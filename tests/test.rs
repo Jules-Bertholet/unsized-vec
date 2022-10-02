@@ -1,6 +1,6 @@
 #![feature(unsized_fn_params)]
 
-use unsized_vec::UnsizedVec;
+use unsized_vec::*;
 
 #[test]
 fn test() {
@@ -29,6 +29,6 @@ fn test_unsized() {
     vec.push(*slice);
     vec[2][1] = 19;
     assert_eq!(&vec[2], &[4, 19, 3]);
-    //assert_eq!(vec.pop().unwrap(), 34);
-    //assert_eq!(vec.pop().unwrap(), 32);
+    let popped: Box<[i32]> = box_new_with(|e| vec.pop_unwrap(e));
+    assert_eq!(&*popped, &[4, 19, 3]);
 }

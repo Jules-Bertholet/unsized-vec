@@ -4,11 +4,14 @@
 
 extern crate alloc as alloc_crate;
 
-use alloc_crate::alloc::{self, Layout};
+use alloc_crate::{
+    alloc::{self, Layout},
+    boxed::Box,
+};
 use core::{
     cmp,
     marker::PhantomData,
-    mem,
+    mem::{self, MaybeUninit},
     ops::{Index, IndexMut},
     ptr::{self, NonNull, Pointee},
 };
@@ -90,6 +93,7 @@ impl<T: ?Sized + Aligned> UnsizedVec<T> {
         self.cap = new_cap;
     }
 
+    #[inline]
     fn offset_next(&self) -> usize {
         self.metadata.last().map_or(0, |m| m.offset_next)
     }
@@ -118,6 +122,29 @@ impl<T: ?Sized + Aligned> UnsizedVec<T> {
             metadata,
             offset_next: new_end_offset,
         });
+    }
+
+    pub fn pop_unwrap(
+        &mut self,
+        emplacer: &mut dyn FnMut(Layout, <T as Pointee>::Metadata, &mut dyn FnMut(*mut ())),
+    ) {
+        let MetadataStorage {
+            metadata,
+            offset_next: offset_end,
+        } = self.metadata.pop().unwrap();
+        let offset_start = self.offset_next();
+        let len = offset_end - offset_start;
+        emplacer(
+            Layout::from_size_align(len, T::ALIGN).unwrap(),
+            metadata,
+            &mut |dst| unsafe {
+                ptr::copy_nonoverlapping(
+                    self.ptr.as_ptr().cast::<u8>().add(offset_start),
+                    dst.cast::<u8>(),
+                    len,
+                )
+            },
+        )
     }
 
     #[must_use]
@@ -150,7 +177,7 @@ impl<T: ?Sized + Aligned> UnsizedVec<T> {
 impl<T: ?Sized + Aligned> Drop for UnsizedVec<T> {
     fn drop(&mut self) {
         while let Some(MetadataStorage { metadata, .. }) = self.metadata.pop() {
-            let offset = self.metadata.last().map_or(0, |ms| ms.offset_next);
+            let offset = self.offset_next();
 
             let start_ptr: *mut u8 = self.ptr.as_ptr().cast();
             let offset_ptr = unsafe { start_ptr.add(offset).cast::<()>() };
@@ -196,4 +223,18 @@ impl<T> Default for UnsizedVec<T> {
     fn default() -> Self {
         Self::new()
     }
+}
+
+pub fn box_new_with<T: ?Sized>(
+    unsized_ret: impl FnOnce(&mut dyn FnMut(Layout, <T as Pointee>::Metadata, &mut dyn FnMut(*mut ()))),
+) -> Box<T> {
+    let mut uninit_box = MaybeUninit::uninit();
+    unsized_ret(&mut |layout, meta, closure| {
+        let box_ptr = unsafe { alloc::alloc(layout) as *mut () };
+        closure(box_ptr);
+        let init_box = unsafe { Box::from_raw(ptr::from_raw_parts_mut(box_ptr, meta)) };
+        uninit_box.write(init_box);
+    });
+
+    unsafe { uninit_box.assume_init() }
 }
