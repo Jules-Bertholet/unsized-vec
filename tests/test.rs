@@ -1,5 +1,6 @@
 #![feature(unsized_fn_params)]
 
+use emplace::*;
 use unsized_vec::*;
 
 #[test]
@@ -42,7 +43,7 @@ fn test_unsized() {
     assert_eq!(&vec[1], &[1, 2]);
     assert_eq!(&vec[2], &[]);
 
-    let removed: Box<[u32]> = box_new_with(|e| vec.remove(1, e));
+    let removed: Box<[i32]> = box_new_with(|e| vec.remove(1, e));
     assert_eq!(&*removed, &[1, 2]);
     assert_eq!(&vec[0], &[4, 7, 3, 4, 5, 6, 6, -1]);
     assert_eq!(&vec[1], &[]);

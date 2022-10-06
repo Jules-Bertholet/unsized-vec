@@ -4,17 +4,17 @@
 
 extern crate alloc as alloc_crate;
 
-use alloc_crate::{
-    alloc::{self, Layout},
-    boxed::Box,
-};
+use alloc_crate::alloc::{self, Layout};
 use core::{
     cmp,
     marker::PhantomData,
-    mem::{self, MaybeUninit},
+    mem::{self},
     ops::{Index, IndexMut},
     ptr::{self, NonNull, Pointee},
 };
+
+pub mod emplace;
+use emplace::*;
 
 pub trait Aligned {
     const ALIGN: usize;
@@ -203,17 +203,14 @@ impl<T: ?Sized + Aligned> UnsizedVec<T> {
     //
     // Panics if len is 0; unfortunately it's not possible to have unsized values inside enums
     // in Rust, so we can't return `Option`.
-    pub fn pop_unwrap(
-        &mut self,
-        emplacer: &mut dyn FnMut(Layout, <T as Pointee>::Metadata, &mut dyn FnMut(*mut ())),
-    ) {
+    pub fn pop_unwrap(&mut self, emplacer: &mut Emplacer<T>) {
         let MetadataStorage {
             metadata,
             offset_next: offset_end,
         } = self.metadata.pop().unwrap();
         let offset_start = self.offset_next();
         let size_of_val = offset_end - offset_start;
-        emplacer(
+        emplacer.0(
             Layout::from_size_align(size_of_val, T::ALIGN).unwrap(),
             metadata,
             &mut |dst| unsafe {
@@ -233,11 +230,7 @@ impl<T: ?Sized + Aligned> UnsizedVec<T> {
     // # Panics
     //
     // Panics if index is out of bounds.
-    pub fn remove(
-        &mut self,
-        index: usize,
-        emplacer: &mut dyn FnMut(Layout, <T as Pointee>::Metadata, &mut dyn FnMut(*mut ())),
-    ) {
+    pub fn remove(&mut self, index: usize, emplacer: &mut Emplacer<T>) {
         let MetadataStorage {
             metadata,
             offset_next: offset_end,
@@ -251,7 +244,7 @@ impl<T: ?Sized + Aligned> UnsizedVec<T> {
             ms.offset_next -= size_of_val;
         }
 
-        emplacer(
+        emplacer.0(
             Layout::from_size_align(size_of_val, T::ALIGN).unwrap(),
             metadata,
             &mut |dst| unsafe {
@@ -348,19 +341,4 @@ impl<T> Default for UnsizedVec<T> {
     fn default() -> Self {
         Self::new()
     }
-}
-
-pub fn box_new_with<T: ?Sized>(
-    unsized_ret: impl FnOnce(&mut dyn FnMut(Layout, <T as Pointee>::Metadata, &mut dyn FnMut(*mut ()))),
-) -> Box<T> {
-    let mut uninit_box = MaybeUninit::uninit();
-    // FIXME don't allow transmute between types with same metadagta
-    unsized_ret(&mut |layout, meta, closure| {
-        let box_ptr = unsafe { alloc::alloc(layout) as *mut () };
-        closure(box_ptr);
-        let init_box = unsafe { Box::from_raw(ptr::from_raw_parts_mut(box_ptr, meta)) };
-        uninit_box.write(init_box);
-    });
-
-    unsafe { uninit_box.assume_init() }
 }
