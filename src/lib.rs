@@ -52,8 +52,8 @@ struct MetadataStorage<P: ?Sized> {
 pub struct UnsizedVec<T: ?Sized + Aligned> {
     ptr: NonNull<()>,
     cap: usize,
-    _marker: PhantomData<(*mut T, T)>,
     metadata: alloc_crate::vec::Vec<MetadataStorage<T>>,
+    _marker: PhantomData<(*mut T, T)>,
 }
 
 unsafe impl<T: Send> Send for UnsizedVec<T> {}
@@ -66,8 +66,8 @@ impl<T: ?Sized + Aligned> UnsizedVec<T> {
         UnsizedVec {
             ptr: <T as Aligned>::dangling_thin(),
             cap: 0,
-            _marker: PhantomData,
             metadata: Default::default(),
+            _marker: PhantomData,
         }
     }
 
@@ -210,13 +210,14 @@ impl<T: ?Sized + Aligned> UnsizedVec<T> {
     // Panics if len is 0; unfortunately it's not possible to have unsized values inside enums
     // in Rust, so we can't return `Option`.
     pub fn pop_unwrap(&mut self, emplacer: &mut Emplacer<T>) {
+        // Panics if len is 0.
         let MetadataStorage {
             metadata,
             offset_next: offset_end,
         } = self.metadata.pop().unwrap();
         let offset_start = self.offset_next();
         let size_of_val = offset_end - offset_start;
-        let emplace_fn = unsafe { emplacer.unwrap() };
+        let emplace_fn = unsafe { emplacer.into_inner() };
         emplace_fn(
             Layout::from_size_align(size_of_val, T::ALIGN).unwrap(),
             metadata,
@@ -251,7 +252,7 @@ impl<T: ?Sized + Aligned> UnsizedVec<T> {
             ms.offset_next -= size_of_val;
         }
 
-        let emplace_fn = unsafe { emplacer.unwrap() };
+        let emplace_fn = unsafe { emplacer.into_inner() };
         emplace_fn(
             Layout::from_size_align(size_of_val, T::ALIGN).unwrap(),
             metadata,

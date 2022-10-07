@@ -32,7 +32,7 @@ impl<T: ?Sized> Emplacer<T> {
     ///
     /// If you unwrap this `Emplacer` and call the resulting closure, you must ensure
     /// that the closue you pass in writes a valid value of type `T` to the passed-in pointer.
-    pub unsafe fn unwrap(
+    pub unsafe fn into_inner(
         &mut self,
     ) -> &mut dyn FnMut(Layout, <T as Pointee>::Metadata, &mut dyn FnMut(*mut PhantomData<T>)) {
         // Safety: `repr(transparent)` guarantees compatible layouts
