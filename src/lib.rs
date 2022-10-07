@@ -345,7 +345,7 @@ impl<T: ?Sized + Aligned> IndexMut<usize> for UnsizedVec<T> {
     }
 }
 
-impl<T> Default for UnsizedVec<T> {
+impl<T: ?Sized + Aligned> Default for UnsizedVec<T> {
     fn default() -> Self {
         Self::new()
     }
