@@ -8,7 +8,7 @@ use alloc_crate::alloc::{self, Layout};
 use core::{
     cmp,
     marker::PhantomData,
-    mem::{self},
+    mem,
     ops::{Index, IndexMut},
     ptr::{self, NonNull, Pointee},
 };
@@ -16,27 +16,33 @@ use core::{
 pub mod emplace;
 use emplace::*;
 
-pub trait Aligned {
-    const ALIGN: usize;
+pub mod marker {
+    use core::{mem, ptr::NonNull};
 
-    fn dangling_thin() -> NonNull<()>;
-}
+    pub trait Aligned {
+        const ALIGN: usize;
 
-impl<T> Aligned for T {
-    const ALIGN: usize = mem::align_of::<Self>();
+        fn dangling_thin() -> NonNull<()>;
+    }
 
-    fn dangling_thin() -> NonNull<()> {
-        NonNull::<T>::dangling().cast()
+    impl<T> Aligned for T {
+        const ALIGN: usize = mem::align_of::<Self>();
+
+        fn dangling_thin() -> NonNull<()> {
+            NonNull::<T>::dangling().cast()
+        }
+    }
+
+    impl<T> Aligned for [T] {
+        const ALIGN: usize = mem::align_of::<T>();
+
+        fn dangling_thin() -> NonNull<()> {
+            NonNull::<T>::dangling().cast()
+        }
     }
 }
 
-impl<T> Aligned for [T] {
-    const ALIGN: usize = mem::align_of::<T>();
-
-    fn dangling_thin() -> NonNull<()> {
-        NonNull::<T>::dangling().cast()
-    }
-}
+use marker::Aligned;
 
 struct MetadataStorage<P: ?Sized> {
     metadata: <P as Pointee>::Metadata,
@@ -210,7 +216,8 @@ impl<T: ?Sized + Aligned> UnsizedVec<T> {
         } = self.metadata.pop().unwrap();
         let offset_start = self.offset_next();
         let size_of_val = offset_end - offset_start;
-        emplacer.0(
+        let emplace_fn = unsafe { emplacer.unwrap() };
+        emplace_fn(
             Layout::from_size_align(size_of_val, T::ALIGN).unwrap(),
             metadata,
             &mut |dst| unsafe {
@@ -244,7 +251,8 @@ impl<T: ?Sized + Aligned> UnsizedVec<T> {
             ms.offset_next -= size_of_val;
         }
 
-        emplacer.0(
+        let emplace_fn = unsafe { emplacer.unwrap() };
+        emplace_fn(
             Layout::from_size_align(size_of_val, T::ALIGN).unwrap(),
             metadata,
             &mut |dst| unsafe {
