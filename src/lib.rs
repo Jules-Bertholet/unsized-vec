@@ -1,12 +1,22 @@
-#![no_std]
-#![feature(forget_unsized, ptr_metadata, strict_provenance, unsized_fn_params)]
 #![deny(unsafe_op_in_unsafe_fn)]
+#![allow(incomplete_features)] // For `specialization`
+#![feature(
+    forget_unsized,
+    ptr_metadata,
+    // We avoid specializing based on subtyping,
+    // so should be sound.
+    specialization,
+    strict_provenance,
+    unsized_fn_params
+)]
+#![no_std]
 
 extern crate alloc as alloc_crate;
 
 use alloc_crate::alloc::{self, Layout};
 use core::{
     cmp,
+    hash::Hash,
     marker::PhantomData,
     mem,
     ops::{Index, IndexMut},
@@ -16,37 +26,79 @@ use core::{
 pub mod emplace;
 use emplace::*;
 
-pub mod marker {
-    use core::{mem, ptr::NonNull};
+pub mod marker;
 
-    pub trait Aligned {
-        const ALIGN: usize;
+use marker::{Aligned, MetadataRemainder, SplitMetadata};
 
-        fn dangling_thin() -> NonNull<()>;
+/// Used by `UnsizedVec` for space optimization for storing sized values.
+/// See module `marker` for more examples of this pattern.
+trait OffsetNextRemainder<T: ?Sized>: Copy + Send + Sync + Ord + Hash + Unpin {
+    #[must_use]
+    fn from_offset_next(offset_next: usize) -> Self;
+
+    #[must_use]
+    fn to_offset_next(self, index: usize) -> usize;
+
+    #[must_use]
+    fn add(self, add: usize) -> Self;
+
+    #[must_use]
+    fn sub(self, sub: usize) -> Self;
+}
+
+impl<T: ?Sized> OffsetNextRemainder<T> for usize {
+    #[inline]
+    fn from_offset_next(offset_next: usize) -> Self {
+        offset_next
     }
 
-    impl<T> Aligned for T {
-        const ALIGN: usize = mem::align_of::<Self>();
-
-        fn dangling_thin() -> NonNull<()> {
-            NonNull::<T>::dangling().cast()
-        }
+    #[inline]
+    fn to_offset_next(self, _: usize) -> usize {
+        self
     }
 
-    impl<T> Aligned for [T] {
-        const ALIGN: usize = mem::align_of::<T>();
+    #[inline]
+    fn add(self, add: usize) -> Self {
+        self + add
+    }
 
-        fn dangling_thin() -> NonNull<()> {
-            NonNull::<T>::dangling().cast()
-        }
+    #[inline]
+    fn sub(self, sub: usize) -> Self {
+        self - sub
     }
 }
 
-use marker::Aligned;
+impl<T> OffsetNextRemainder<T> for () {
+    #[inline]
+    fn from_offset_next(_: usize) -> Self {}
 
-struct MetadataStorage<P: ?Sized> {
-    metadata: <P as Pointee>::Metadata,
-    offset_next: usize,
+    #[inline]
+    fn to_offset_next(self, index: usize) -> usize {
+        mem::size_of::<T>() * index
+    }
+
+    #[inline]
+    fn add(self, _: usize) {}
+
+    #[inline]
+    fn sub(self, _: usize) {}
+}
+
+trait SplitOffsetNext {
+    type Remainder: OffsetNextRemainder<Self>;
+}
+
+impl<T: ?Sized> SplitOffsetNext for T {
+    default type Remainder = usize;
+}
+
+impl<T> SplitOffsetNext for T {
+    type Remainder = ();
+}
+
+struct MetadataStorage<T: ?Sized> {
+    metadata_remainder: <T as SplitMetadata>::Remainder,
+    offset_next_remainder: <T as SplitOffsetNext>::Remainder,
 }
 
 pub struct UnsizedVec<T: ?Sized + Aligned> {
@@ -104,7 +156,9 @@ impl<T: ?Sized + Aligned> UnsizedVec<T> {
     /// Get the offset of one byte past the end of the last element in th vec.
     #[inline]
     fn offset_next(&self) -> usize {
-        self.metadata.last().map_or(0, |m| m.offset_next)
+        self.metadata.last().map_or(0, |m| {
+            m.offset_next_remainder.to_offset_next(self.len() - 1)
+        })
     }
 
     /// Add element to end of the vec.
@@ -135,17 +189,19 @@ impl<T: ?Sized + Aligned> UnsizedVec<T> {
         mem::forget_unsized(elem);
 
         self.metadata.push(MetadataStorage {
-            metadata,
-            offset_next: new_end_offset,
+            metadata_remainder: <T as SplitMetadata>::Remainder::from_metadata(metadata),
+            offset_next_remainder: <T as SplitOffsetNext>::Remainder::from_offset_next(
+                new_end_offset,
+            ),
         });
     }
 
     /// Get the offset of one byte past the end of element index - 1 in the vec.
     #[inline]
     fn offset_start_idx(&self, index: usize) -> usize {
-        index
-            .checked_sub(1)
-            .map_or(0, |i| self.metadata[i].offset_next)
+        index.checked_sub(1).map_or(0, |i| {
+            self.metadata[i].offset_next_remainder.to_offset_next(i)
+        })
     }
 
     /// Insert element into vec at given index, shifting following elements to the right.
@@ -164,7 +220,7 @@ impl<T: ?Sized + Aligned> UnsizedVec<T> {
 
         // Update offsets of follwing elements
         for ms in &mut self.metadata[index..] {
-            ms.offset_next += size_of_val;
+            ms.offset_next_remainder = ms.offset_next_remainder.add(size_of_val);
         }
 
         let offset_start = self.offset_start_idx(index);
@@ -195,8 +251,10 @@ impl<T: ?Sized + Aligned> UnsizedVec<T> {
         self.metadata.insert(
             index,
             MetadataStorage {
-                metadata,
-                offset_next: offset_start + size_of_val,
+                metadata_remainder: <T as SplitMetadata>::Remainder::from_metadata(metadata),
+                offset_next_remainder: <T as SplitOffsetNext>::Remainder::from_offset_next(
+                    offset_start + size_of_val,
+                ),
             },
         );
     }
@@ -212,11 +270,13 @@ impl<T: ?Sized + Aligned> UnsizedVec<T> {
     pub fn pop_unwrap(&mut self, emplacer: &mut Emplacer<T>) {
         // Panics if len is 0.
         let MetadataStorage {
-            metadata,
-            offset_next: offset_end,
+            metadata_remainder,
+            offset_next_remainder: offset_end_remainder,
         } = self.metadata.pop().unwrap();
         let offset_start = self.offset_next();
+        let offset_end = offset_end_remainder.to_offset_next(self.metadata.len());
         let size_of_val = offset_end - offset_start;
+        let metadata = metadata_remainder.to_metadata(size_of_val);
         let emplace_fn = unsafe { emplacer.into_inner() };
         emplace_fn(
             Layout::from_size_align(size_of_val, T::ALIGN).unwrap(),
@@ -240,16 +300,17 @@ impl<T: ?Sized + Aligned> UnsizedVec<T> {
     // Panics if index is out of bounds.
     pub fn remove(&mut self, index: usize, emplacer: &mut Emplacer<T>) {
         let MetadataStorage {
-            metadata,
-            offset_next: offset_end,
+            metadata_remainder,
+            offset_next_remainder: offset_end_remainder,
         } = self.metadata.remove(index);
         let offset_start = self.offset_start_idx(index);
-
+        let offset_end = offset_end_remainder.to_offset_next(index);
         let size_of_val = offset_end - offset_start;
+        let metadata = metadata_remainder.to_metadata(size_of_val);
 
         // Update offsets of follwing elements
         for ms in &mut self.metadata[index..] {
-            ms.offset_next -= size_of_val;
+            ms.offset_next_remainder = ms.offset_next_remainder.sub(size_of_val);
         }
 
         let emplace_fn = unsafe { emplacer.into_inner() };
@@ -291,8 +352,14 @@ impl<T: ?Sized + Aligned> UnsizedVec<T> {
     #[must_use]
     #[inline]
     fn index_raw(&self, index: usize) -> (*mut (), <T as Pointee>::Metadata) {
-        let metadata = self.metadata[index].metadata;
+        let MetadataStorage {
+            metadata_remainder,
+            offset_next_remainder,
+        } = self.metadata[index];
         let offset = self.offset_start_idx(index);
+        let offset_next = offset_next_remainder.to_offset_next(index);
+        let size_of_val = offset_next - offset;
+        let metadata = metadata_remainder.to_metadata(size_of_val);
         let start_ptr: *mut u8 = self.ptr.as_ptr().cast();
         let offset_ptr = unsafe { start_ptr.add(offset).cast::<()>() };
         (offset_ptr, metadata)
@@ -302,8 +369,15 @@ impl<T: ?Sized + Aligned> UnsizedVec<T> {
 impl<T: ?Sized + Aligned> Drop for UnsizedVec<T> {
     fn drop(&mut self) {
         if mem::needs_drop::<T>() {
-            while let Some(MetadataStorage { metadata, .. }) = self.metadata.pop() {
+            while let Some(MetadataStorage {
+                metadata_remainder,
+                offset_next_remainder,
+            }) = self.metadata.pop()
+            {
                 let offset = self.offset_next();
+                let offset_next = offset_next_remainder.to_offset_next(self.metadata.len());
+                let size_of_val = offset_next - offset;
+                let metadata = metadata_remainder.to_metadata(size_of_val);
 
                 let start_ptr: *mut u8 = self.ptr.as_ptr().cast();
                 let offset_ptr = unsafe { start_ptr.add(offset).cast::<()>() };
