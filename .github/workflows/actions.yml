@@ -28,13 +28,13 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all --check
 
-      - name: Run tests
-        run: cargo test
+      - name: Run tests in relase mode
+        run: cargo test --release
 
       - name: Run tests with careful
         run: cargo careful test
 
-      - name: Run clippy (all features)
+      - name: Run clippy
         run: cargo clippy --message-format=json | clippy-sarif | tee rust-clippy-results.sarif | sarif-fmt
 
       - name: Upload clippy analysis results to GitHub
