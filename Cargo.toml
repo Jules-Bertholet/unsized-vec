@@ -1,9 +1,9 @@
 [package]
 name = "unsized-vec"
-version = "0.0.1-alpha.1"
+version = "0.0.1-alpha.2"
 edition = "2021"
 authors = ["Jules Bertholet <julesbertholet@quoi.xyz>"]
-description = "Like `Vec`, but for unsized values"
+description = "Like Vec, but for unsized values"
 repository = "https://github.com/Jules-Bertholet/unsized-vec/"
 license = "MIT OR Apache-2.0"
 keywords = ["vec", "vector", "unsized"]

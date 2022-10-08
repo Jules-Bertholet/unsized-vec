@@ -284,6 +284,29 @@ impl<T: ?Sized> Copy for MetadataStorage<T> {}
 /// In the third case, the second allocation, in addition to storing offsets, also stores
 /// the pointer metadata of each element.
 ///
+/// # Example
+///
+/// ```
+/// #![feature(unsized_fn_params)]
+/// use core::fmt::Debug;
+/// use unsized_vec::{*, emplace::box_new_with};
+///
+/// // `Box::new()` necessary only to coerce the values to trait objects.
+/// let obj: Box<dyn Debug> = Box::new(1);
+/// let obj_2: Box<dyn Debug> = Box::new((97_u128, "oh noes"));
+/// let mut vec: UnsizedVec<dyn Debug> = unsized_vec![*obj, *obj_2];
+/// for traitobj in &vec {
+///     dbg!(traitobj);
+/// };
+///
+/// assert_eq!(vec.len(), 2);
+///
+/// let popped = box_new_with(|e| vec.pop_unwrap(e));
+/// dbg!(&*popped);
+///
+/// assert_eq!(vec.len(), 1);
+/// ```
+///
 /// [0]: alloc_crate::vec::Vec
 pub struct UnsizedVec<T: ?Sized> {
     ptr: NonNull<()>,
