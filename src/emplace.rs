@@ -1,3 +1,5 @@
+//! Traits and functions to support functions that return unsized values.
+
 #![allow(clippy::type_complexity)]
 
 use alloc_crate::{
@@ -25,13 +27,19 @@ impl<T: ?Sized> Emplacer<T> {
         e: &mut dyn FnMut(Layout, <T as Pointee>::Metadata, &mut dyn FnMut(*mut PhantomData<T>)),
     ) -> &mut Emplacer<T> {
         // Safety: `repr(transparent)` guarantees compatible layouts
-        unsafe { mem::transmute(e) }
+        unsafe {
+            &mut *(e as *mut dyn for<'a> FnMut(
+                Layout,
+                <T as Pointee>::Metadata,
+                &'a mut (dyn core::ops::FnMut(*mut PhantomData<T>) + 'a),
+            ) as *mut Emplacer<T>)
+        }
     }
 
     /// # Safety
     ///
     /// If you unwrap this `Emplacer` and call the resulting closure, you must ensure
-    /// that the closue you pass in writes a valid value of type `T` to the passed-in pointer
+    /// that the closure you pass in writes a valid value of type `T` to the passed-in pointer
     /// (or panics, or runs forever, or exits without returning in some other otherwise-sound way).
     pub unsafe fn into_inner(
         &mut self,
@@ -75,9 +83,9 @@ pub fn box_new_with<T: ?Sized>(unsized_ret: impl FnOnce(&mut Emplacer<T>)) -> Bo
             layout,
         };
 
-        closure(deallocer.ptr as *mut PhantomData<T>);
+        closure(deallocer.ptr.cast());
         let init_box =
-            unsafe { Box::from_raw(ptr::from_raw_parts_mut(deallocer.ptr as *mut (), meta)) };
+            unsafe { Box::from_raw(ptr::from_raw_parts_mut(deallocer.ptr.cast::<()>(), meta)) };
 
         // Now that we've succesfully initialized the box,
         // we don't want to deallocate its memory.
@@ -90,9 +98,7 @@ pub fn box_new_with<T: ?Sized>(unsized_ret: impl FnOnce(&mut Emplacer<T>)) -> Bo
 
     unsized_ret(unsafe { Emplacer::new(closure) });
 
-    if !initialized {
-        panic!("Emplacer wasn't run")
-    }
+    assert!(initialized, "Emplacer wasn't run");
 
     unsafe { uninit_box.assume_init() }
 }
