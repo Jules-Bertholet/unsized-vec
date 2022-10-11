@@ -1,6 +1,6 @@
 [package]
 name = "unsized-vec"
-version = "0.0.1-alpha.2"
+version = "0.0.1-alpha.3"
 edition = "2021"
 authors = ["Jules Bertholet <julesbertholet@quoi.xyz>"]
 description = "Like Vec, but for unsized values"

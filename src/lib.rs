@@ -24,16 +24,13 @@
 
 extern crate alloc as alloc_crate;
 
-use alloc_crate::{
-    alloc::{self, Layout},
-    vec::Vec,
-};
+use alloc_crate::alloc::{self, Layout};
 use core::{
     alloc::{AllocError, Allocator},
     cmp,
     fmt::{self, Debug, Formatter},
     hash::Hash,
-    iter::{self, FusedIterator},
+    iter::FusedIterator,
     marker::PhantomData,
     mem,
     num::NonZeroUsize,
@@ -454,131 +451,102 @@ impl<T: ?Sized> UnsizedVec<T> {
     /// Realigns all elements in the vec to the given `new_align`.
     ///
     /// # Safety
-    /// - `new_align` must be greater than current alignment
-    /// - `grow_if_needed` must have been called to ensure the allocation is well-aligned and large enough
+    ///
+    /// `new_align` must be greater than current alignment, less than or equal to
+    /// the actual alignment of the allocation, and a valid (power of 2) alignment.
+    /// `grow_if_needed` should be used to ensure these conditions are met.
     unsafe fn realign(&mut self, new_align: NonZeroUsize) {
         let old_align = self.align.to_align();
 
         // We compute the new offset of each element, along with the difference from the old offset.
         // Then, we copy everything over.
-        // Unfortunately, doing this in O(n) requires allocating (as far as I can figure),
-        // though we try our best to do so as little as possible
-        // (which unfortunately requires some complicated code).
+        // Doing this without allocating requires some complicated code.
 
         // The first element is already in the right place, its offset is 0.
 
-        if let Some(len_sub_2) = self.metadata.len().checked_sub(2) {
-            // offset_shifts_i_plus_1[i] equals the number of bytes element `i + 1` needs to be shifted right by.
-            // We allocate this up front, because we don't want to unwind while our `Vec` metadata is in an invalid state.
-            let mut offset_shifts_i_plus_1: Vec<usize> = Vec::with_capacity(len_sub_2 + 1);
-            let mut cumulative_shift: usize = 0;
+        if self.len() > 1 {
+            // First we calculate how much we need to shift the very last element,
+            // then we go backward from there.
 
-            // Stores the new offsets into our `Vec` and populates `offset_shifts_i_plus_1`.
-            // Starting from this point, it's UB if we unwind !!!
-            // To make this explicit, we use only "unchecked" variants of potentially-panicking operations.
-            for (
-                index,
-                MetadataStorage {
-                    offset_next_remainder,
-                    ..
-                },
-            ) in self.metadata.iter_mut().enumerate()
-            {
-                // Safety: can't overflow `usize` as allocation capped to `isize`
-                let new_offset_next = unsafe {
-                    offset_next_remainder
-                        .to_offset_next(index)
-                        .unchecked_add(cumulative_shift)
-                };
-
-                *offset_next_remainder =
-                    <T as SplitOffsetNext>::Remainder::from_offset_next(new_offset_next);
-
-                if index <= len_sub_2 {
-                    // Safety: `cumulative_shift` can't overflow `usize`, as allocation capped to `isize`.
-                    // Subtraction can't oveflow because shift is always positive.
-                    // `next_multiple_of` is passed `new_align`, which is known to be a valid alignment,
-                    // and therefore much less than `isize::MAX` (so no overflow risk).
+            // Starting here, our offsets are invalid, so unwinding is UB !!!
+            // To make this explicit, we use unckecked ops for arithmetic.
+            let last_offset_shift: usize = self.metadata.iter_mut().enumerate().fold(
+                0,
+                |cum_shift,
+                 (
+                    index,
+                    MetadataStorage {
+                        offset_next_remainder,
+                        ..
+                    },
+                )| {
+                    let old_offset_next = offset_next_remainder.to_offset_next(index);
+                    // Safety: additions can't overflow because that would mean our allocation is bigger than its max value.
+                    // Subtraction can't overflow because `next_multiple_of` gives greater-than-or-equal result
+                    // for greater-than-or-equal align. `next_multiple_of_unchecked` safe as we are using a valid align.
                     unsafe {
-                        cumulative_shift = cumulative_shift.unchecked_add(
+                        let new_offset_next = old_offset_next.unchecked_add(cum_shift);
+                        cum_shift.unchecked_add(
                             next_multiple_of_unchecked(new_offset_next, new_align).unchecked_sub(
                                 next_multiple_of_unchecked(new_offset_next, old_align),
                             ),
-                        );
+                        )
                     }
+                },
+            );
 
-                    // Safety: We allocated enough memory upfront above,
-                    // so `push` can't panic.
-                    offset_shifts_i_plus_1.push(cumulative_shift);
-                }
-            }
+            // Now we go in reverse.
 
-            // Now we actually copy the elements over.
-            // First, we have to set up and zip a lot of iterators;
-            // we can't use `Vec`s because that would mean allocating.
+            let _ = self.metadata.array_windows::<2>().enumerate().rev().fold(
+                last_offset_shift,
+                |shift_end,
+                 (
+                    index,
+                    [MetadataStorage {
+                        offset_next_remainder: offset_start_remainder,
+                        ..
+                    }, MetadataStorage {
+                        offset_next_remainder,
+                        ..
+                    }],
+                )| {
+                    let new_offset_next = offset_next_remainder.to_offset_next(index);
 
-            let mut offset_next_iter = self
-                .metadata
-                .iter()
-                .enumerate()
-                .map(|(index, ms)| ms.offset_next_remainder.to_offset_next(index))
-                .rev();
+                    // Safety: reversing computation above.
+                    let shift_start = unsafe {
+                        shift_end.unchecked_sub(
+                            next_multiple_of_unchecked(new_offset_next, new_align).unchecked_sub(
+                                next_multiple_of_unchecked(new_offset_next, old_align),
+                            ),
+                        )
+                    };
 
-            // We are only interested in offsets of elements already in the vec.
-            offset_next_iter.next();
+                    // Safety: `new_align` is valid alignment.
+                    let new_offset_start = unsafe {
+                        next_multiple_of_unchecked(
+                            offset_start_remainder.to_offset_next(index),
+                            new_align,
+                        )
+                    };
 
-            // Safety: we checked the length of the `Vec` in the `if` guard above.
-            let first_ms = unsafe { self.metadata.first().unwrap_unchecked() };
+                    // Safety: reversing computation above.
+                    let old_offset_start = unsafe { new_offset_start.unchecked_sub(shift_start) };
 
-            let elem_sizes_iter = iter::once(first_ms.offset_next_remainder.to_offset_next(0))
-                .chain(self.metadata.array_windows::<2>().enumerate().map(
-                    |(
-                            index,
-                            [MetadataStorage {
-                                offset_next_remainder: l_off_rem,
-                                ..
-                            }, MetadataStorage {
-                                offset_next_remainder: r_off_rem,
-                                ..
-                            }],
-                        )|
-                        // Safety: Right offset can't be less than left offset,
-                        // so subtraction can't overflow.
-                        // `new_align` is a valid align,
-                        // so `next_multiple_of` can't overflow.
-                        unsafe {
-                            r_off_rem.to_offset_next(index).unchecked_sub(
-                                next_multiple_of_unchecked(
-                                    l_off_rem.to_offset_next(index),
-                                    new_align,
-                                ),
-                            )
-                        },
-                ));
+                    // Safety: End offset >= start offset
+                    let elem_len = unsafe { new_offset_next.unchecked_sub(new_offset_start) };
 
-            // Copy in reverse order, so as not to overwrite old stuff.
-            for (new_offset, (shift_next, elem_size)) in offset_next_iter.zip(
-                offset_shifts_i_plus_1
-                    .into_iter()
-                    .rev()
-                    .zip(elem_sizes_iter.rev()),
-            ) {
-                // Safety:
-                // next_multiple_of` can't overflow as `old_align` and `new_align` are valid alignments.
-                // `ptr::copy` copies from the old offsets to the new offsets as computed above.
-                unsafe {
-                    let old_offset_unaligned = new_offset - shift_next;
-                    let old_offset_aligned =
-                        next_multiple_of_unchecked(old_offset_unaligned, old_align);
-                    let new_offset_aligned = next_multiple_of_unchecked(new_offset, new_align);
+                    // Safety: moving element to new correct position, as computed above
+                    unsafe {
+                        ptr::copy(
+                            self.ptr.as_ptr().cast::<u8>().add(old_offset_start),
+                            self.ptr.as_ptr().cast::<u8>().add(new_offset_start),
+                            elem_len,
+                        );
+                    };
 
-                    ptr::copy(
-                        self.ptr.as_ptr().cast::<u8>().add(old_offset_aligned),
-                        self.ptr.as_ptr().cast::<u8>().add(new_offset_aligned),
-                        elem_size,
-                    );
-                }
-            }
+                    shift_start
+                },
+            );
         }
 
         self.align = <T as StoreAlign>::AlignStore::from_align(new_align);
