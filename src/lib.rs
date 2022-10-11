@@ -361,6 +361,52 @@ impl<T: ?Sized> UnsizedVec<T> {
         ret
     }
 
+    /// Make a new `UnsizedVec` with at least the the given capacity, in bytes.
+    #[must_use]
+    #[inline]
+    pub fn with_byte_capacity(byte_capacity: usize) -> Self
+    where
+        T: Aligned,
+    {
+        let mut ret = UnsizedVec {
+            ptr: dangling_perfect_align(),
+            cap: 0,
+            align: (),
+            metadata: Default::default(),
+            _marker: PhantomData,
+        };
+
+        // Nothing in the vec, no need to adjust anything.
+        // Safety: `T::ALIGN` equals the type's alignment.
+        let _ = unsafe { ret.grow_if_needed(byte_capacity, T::ALIGN) };
+
+        ret
+    }
+
+    /// Make a new `UnsizedVec` with at least the the given capacity, in number of elements.
+    #[must_use]
+    #[inline]
+    pub fn with_capacity(capacity: usize) -> Self
+    where
+        T: Sized,
+    {
+        let mut ret = UnsizedVec {
+            ptr: dangling_perfect_align(),
+            cap: 0,
+            align: (),
+            metadata: Default::default(),
+            _marker: PhantomData,
+        };
+
+        // Nothing in the vec, no need to adjust anything.
+        // Safety: `T::ALIGN` equals the type's alignment.
+        let _ = unsafe {
+            ret.grow_if_needed(capacity.checked_mul(mem::size_of::<T>()).unwrap(), T::ALIGN)
+        };
+
+        ret
+    }
+
     /// Grow this `UnsizedVec`'s allocation by at least `by_at_least` bytes,
     /// and ensure it has at leas the alignment of `min_align`.
     /// Returns `true` iff *alignment* was increased.
