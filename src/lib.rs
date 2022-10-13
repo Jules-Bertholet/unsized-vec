@@ -430,20 +430,25 @@ impl<T: ?Sized> UnsizedVec<T> {
         // The function's preconditions require `new_align` to be a valid align.
         let new_size = unsafe { new_align.unchecked_align_offset_to(new_size) };
 
-        let mut new_cap = if new_size > self.cap {
-            cmp::min(MAX_ALLOC_SIZE, cmp::max(2 * self.cap, new_size))
+        let old_cap = self.cap;
+
+        let mut new_cap = if new_size > old_cap {
+            (2 * old_cap).clamp(new_size, MAX_ALLOC_SIZE)
         } else {
-            self.cap
+            old_cap
         };
 
         // May be able to use `!self.ptr.as_ptr().is_aligned_to(new_align.into())`
         // instead of `new_align > old_align`?
         // https://github.com/rust-lang/rust/issues/32838 seems soundness requirement
         // not decided
-        if new_cap > self.cap || new_align > old_align {
-            let new_layout = Layout::from_size_align(new_cap, new_align.to_align().into()).unwrap();
+        if new_cap > old_cap || new_align > old_align {
+            // Safety: capacity clamped to `isize::MAX` earlier
+            let mut new_layout = unsafe {
+                Layout::from_size_align(new_cap, new_align.to_align().into()).unwrap_unchecked()
+            };
 
-            let new_ptr: Result<NonNull<[u8]>, AllocError> = if self.cap == 0 {
+            let new_ptr: Result<NonNull<[u8]>, AllocError> = if old_cap == 0 {
                 if new_cap > 0 {
                     alloc::Global.allocate(new_layout)
                 } else {
@@ -453,9 +458,27 @@ impl<T: ?Sized> UnsizedVec<T> {
                     Ok(NonNull::from_raw_parts(self.ptr, 0))
                 }
             } else {
-                let old_layout =
-                    Layout::from_size_align(self.cap, old_align.to_align().into()).unwrap();
-                unsafe { alloc::Global.grow(self.ptr.cast(), old_layout, new_layout) }
+                unsafe {
+                    // Safety: old layout comes from vec, so must be valid
+                    let old_layout = Layout::from_size_align(old_cap, old_align.to_align().into())
+                        .unwrap_unchecked();
+
+                    alloc::Global
+                        .grow(self.ptr.cast(), old_layout, new_layout)
+                        .or_else(|e| {
+                            // We don't have the memory for 2 * old_cap,
+                            // but maybe we can still allocate just enough for `new_size`.
+                            if new_size > old_cap {
+                                new_cap = new_size;
+                                new_layout =
+                                    Layout::from_size_align(new_cap, new_align.to_align().into())
+                                        .unwrap_unchecked();
+                                alloc::Global.grow(self.ptr.cast(), old_layout, new_layout)
+                            } else {
+                                Err(e)
+                            }
+                        })
+                }
             };
 
             let Ok(new_ptr) = new_ptr else {

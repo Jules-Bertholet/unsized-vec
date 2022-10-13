@@ -92,6 +92,7 @@ unsafe impl<T: ?Sized> AlignStorage<T> for NonZeroUsize {
 
     #[inline]
     fn to_align(self) -> NonZeroUsize {
+        debug_assert!(self.is_power_of_two());
         self
     }
 }
