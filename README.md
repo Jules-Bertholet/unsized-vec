@@ -1,5 +1,7 @@
 # `unsized-vec`
 
+[![docs.rs](https://img.shields.io/docsrs/unsized-vec)](https://docs.rs/unsized-vec/) [![Crates.io](https://img.shields.io/crates/v/unsized-vec)](https://crates.io/crates/unsized-vec)
+
 `UnsizedVec<T>` is like [`Vec<T>`](https://doc.rust-lang.org/alloc/vec/struct.Vec.html), but `T` can be `?Sized`.
 
 ## Features
