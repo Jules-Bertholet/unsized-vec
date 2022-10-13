@@ -1,13 +1,13 @@
-use core::{mem, num::NonZeroUsize};
+use core::mem;
 
-pub(super) fn align_of_val<T: ?Sized>(val: &T) -> NonZeroUsize {
-    // Safety: alignment is never 0
-    unsafe { NonZeroUsize::new_unchecked(mem::align_of_val(val)) }
-}
+use crate::{AlignStorage, StoreAlign};
 
-// # Safety
-//
-// Must not overflow `usize`
-pub(super) unsafe fn next_multiple_of_unchecked(num: usize, align: NonZeroUsize) -> usize {
-    unsafe { num.checked_next_multiple_of(align.get()).unwrap_unchecked() }
+// Returns the alignemnt of the val pointed to by `val`.
+#[must_use]
+#[inline]
+pub(super) fn align_of_val<T: ?Sized>(val: &T) -> <T as StoreAlign>::AlignStore {
+    // Safety: Storing a valid alignment
+    unsafe {
+        <T as StoreAlign>::AlignStore::from_align_exact(mem::align_of_val(val)).unwrap_unchecked()
+    }
 }

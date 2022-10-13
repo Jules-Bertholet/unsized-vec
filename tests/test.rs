@@ -14,6 +14,8 @@ fn test_sized() {
     assert_eq!(vec.len(), 1);
     assert_eq!(vec[0], 32);
 
+    vec.shrink_to_fit();
+
     vec.push(34);
     assert_eq!(vec.len(), 2);
     assert_eq!(vec[1], 34);
@@ -32,6 +34,8 @@ fn test_unsized() {
     let slice: Box<[i32]> = Box::new([]);
     vec.push(*slice);
     assert_eq!(&vec[1], &[]);
+
+    vec.shrink_to_fit();
 
     let slice: Box<[i32]> = Box::new([4, 7, 3]);
     vec.push(*slice);
@@ -102,6 +106,8 @@ fn test_unsized_drop() {
     assert_eq!(&vec[1], &[Box::new(1), Box::new(2)]);
     assert_eq!(&vec[2], &[]);
 
+    vec.shrink_to_fit();
+
     let removed: Box<[Box<i32>]> = box_new_with(|e| vec.remove(1, e));
     assert_eq!(&*removed, &[Box::new(1), Box::new(2)]);
     assert_eq!(
@@ -137,6 +143,8 @@ fn test_dyn() {
     assert_eq!(vec.len(), 1);
     assert_eq!(&format!("{:?}", &*popped), "1");
 
+    vec.shrink_to_fit();
+
     let obj: Box<dyn Debug> = Box::new("walla walla");
     vec.insert(0, *obj);
     assert_eq!(vec.len(), 2);
@@ -154,6 +162,8 @@ fn test_dyn() {
 fn test_macro() {
     let obj: Box<dyn Debug> = Box::new(1);
     let obj_2: Box<dyn Debug> = Box::new((97_u128, "oh noes"));
-    let vec: UnsizedVec<dyn Debug> = unsized_vec![*obj, *obj_2];
+    let mut vec: UnsizedVec<dyn Debug> = unsized_vec![*obj, *obj_2];
     assert_eq!(&format!("{:?}", &vec), "[1, (97, \"oh noes\")]");
+
+    vec.shrink_to_fit();
 }
