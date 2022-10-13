@@ -18,7 +18,8 @@
     specialization,
     strict_provenance,
     unchecked_math,
-    unsized_fn_params
+    unsized_fn_params,
+    vec_into_raw_parts
 )]
 #![no_std]
 
@@ -337,9 +338,9 @@ impl<T: ?Sized> UnsizedVec<T> {
     }
 
     /// Make a new `UnsizedVec` with at least the the given capacity, in number of elements.
-    /// 
+    ///
     /// # Panics
-    /// 
+    ///
     /// Panics if `capacity * mem::size_of::<T>()` overflows `isize::MAX` bytes.
     #[must_use]
     #[inline]
@@ -1335,4 +1336,64 @@ fn a() -> for<'a> fn(
 #[export_name = "b"]
 fn b() -> for<'a> fn(&'a mut UnsizedVec<[u32]>, usize) {
     UnsizedVec::<[u32]>::shrink_align_to
+}
+
+#[cfg(feature = "serde")]
+use serde::{ser::SerializeSeq, Serialize};
+
+#[cfg(feature = "serde")]
+impl<T: ?Sized + Serialize> Serialize for UnsizedVec<T> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut elem_serialize = serializer.serialize_seq(Some(self.len()))?;
+        for elem in self {
+            elem_serialize.serialize_element(elem)?;
+        }
+        elem_serialize.end()
+    }
+}
+
+impl<T> From<alloc_crate::vec::Vec<T>> for UnsizedVec<T> {
+    fn from(value: alloc_crate::vec::Vec<T>) -> Self {
+        let (ptr, len, cap) = value.into_raw_parts();
+
+        UnsizedVec {
+            // Safety: comes from `into_raw_parts`, so can't be null
+            ptr: unsafe { NonNull::new_unchecked(ptr.cast()) },
+            // Safety: multiplication can't overflow,
+            // if it did that would mean the `Vec` had an impossibly large allocation
+            cap: unsafe { cap.unchecked_mul(mem::size_of::<T>()) },
+            metadata: alloc_crate::vec![
+                MetadataStorage {
+                    metadata_remainder: (),
+                    offset_next_remainder: ()
+                };
+                len
+            ],
+            align: (),
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<T> From<UnsizedVec<T>> for alloc_crate::vec::Vec<T> {
+    fn from(value: UnsizedVec<T>) -> Self {
+        // Safety: ptr, len, and cap from an allocation allocated with
+        // the global allocator.
+        let ret = unsafe {
+            alloc_crate::vec::Vec::from_raw_parts(
+                value.ptr.as_ptr().cast(),
+                value.len(),
+                value.cap / mem::size_of::<T>(),
+            )
+        };
+
+        // Don't want to drop the `UnsizedVec`
+        // now that we have transferred ownership of its allocation
+        mem::forget(value);
+
+        ret
+    }
 }
