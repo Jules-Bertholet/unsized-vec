@@ -6,10 +6,13 @@ use core::{
     panic::{RefUnwindSafe, UnwindSafe},
 };
 
+/// Implemented for types that have an alignment known at compile-time.
+///
 /// # Safety
 ///
 /// `ALIGN` must be equal to the alignment of all values of the type.
 pub unsafe trait Aligned {
+    /// The alignment of this type.
     const ALIGN: NonZeroUsize;
 }
 

@@ -12,6 +12,8 @@ use core::{
     ptr::{self, Pointee},
 };
 
+/// Passed as the last argument to functions that return unsized values.
+/// Wraps a closure that tells the function where to write its return value.
 #[repr(transparent)]
 pub struct Emplacer<T: ?Sized>(
     dyn FnMut(Layout, <T as Pointee>::Metadata, &mut dyn FnMut(*mut PhantomData<T>)),

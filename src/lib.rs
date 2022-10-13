@@ -3,6 +3,7 @@
 //! Experimental, nightly-only.
 
 #![deny(unsafe_op_in_unsafe_fn)]
+#![warn(missing_docs)]
 #![allow(incomplete_features)] // For `specialization`
 #![feature(
     allocator_api,
@@ -43,6 +44,7 @@ use emplace::*;
 
 mod helper;
 
+/// Contains the [`Aligned`] trait.
 pub mod marker;
 
 use marker::{AlignStorage, Aligned, StoreAlign};
@@ -860,24 +862,41 @@ impl<T: ?Sized> UnsizedVec<T> {
         );
     }
 
+    /// Returns the number of elements in this `UnsizedVec`.
     #[must_use]
     #[inline]
     pub fn len(&self) -> usize {
         self.metadata.len()
     }
 
+    /// Returns the size of the backing allocation of this `UnsizedVec`, in bytes.
     #[must_use]
     #[inline]
     pub fn byte_capacity(&self) -> usize {
         self.cap
     }
 
+    /// Returns the number of elements that this `UnsizedVec` can store without reallocation.
+    #[must_use]
+    #[inline]
+    pub fn capacity(&self) -> usize
+    where
+        T: Sized,
+    {
+        self.cap
+            .checked_div(mem::size_of::<T>())
+            .unwrap_or(usize::MAX)
+    }
+
+    /// Returns the maximum alignment of the values that this `UnsizedVec` can store without reallocating.
+    /// For `T: Aligned`, this is just the type's alignent.
     #[must_use]
     #[inline]
     pub fn align(&self) -> usize {
         self.align.to_align().into()
     }
 
+    /// Returns true iff `self.len() == 0`.
     #[must_use]
     #[inline]
     pub fn is_empty(&self) -> bool {
@@ -901,11 +920,13 @@ impl<T: ?Sized> UnsizedVec<T> {
         Some((offset_ptr, metadata))
     }
 
+    /// Returns an iterator over shared references to the elements of this `UnsizedVec`.
     #[inline]
     pub fn iter(&self) -> UnsizedVecIter<T> {
         self.into_iter()
     }
 
+    /// Returns an iterator over mutable references to the elements of this `UnsizedVec`.
     #[inline]
     pub fn iter_mut(&mut self) -> UnsizedVecIterMut<T> {
         self.into_iter()
@@ -1119,6 +1140,20 @@ impl<T: ?Sized> UnsizedVec<T> {
             <T as StoreAlign>::AlignStore::from_align(1).unwrap_unchecked()
         });
     }
+
+    /// Reduce capacity, in number of elements, to the smallest value that is as least as big as the supplied value,
+    /// and large enough to fit all elements in the vec currently.
+    ///
+    /// Does nothing when current capacity is less then or equal to supplied value.
+    pub fn shrink_to(&mut self, min_capacity: usize)
+    where
+        T: Sized,
+    {
+        self.shrink_byte_capacity_align_to_inner(
+            min_capacity.saturating_mul(mem::size_of::<T>()),
+            (),
+        );
+    }
 }
 
 impl<T: ?Sized> Drop for UnsizedVec<T> {
@@ -1187,7 +1222,9 @@ impl<T: ?Sized> Default for UnsizedVec<T> {
     }
 }
 
+/// Created by `UnsizedVec::iter()`
 #[must_use]
+#[derive(Debug, Clone)]
 pub struct UnsizedVecIter<'a, T: ?Sized + 'a> {
     vec: &'a UnsizedVec<T>,
     index: usize,
@@ -1231,7 +1268,10 @@ impl<'a, T: ?Sized + 'a> IntoIterator for &'a UnsizedVec<T> {
 impl<'a, T: ?Sized + 'a> ExactSizeIterator for UnsizedVecIter<'a, T> {}
 impl<'a, T: ?Sized + 'a> FusedIterator for UnsizedVecIter<'a, T> {}
 
+/// Created by `UnsizedVec::iter_mut()`
+
 #[must_use]
+#[derive(Debug)]
 pub struct UnsizedVecIterMut<'a, T: ?Sized + 'a> {
     vec: &'a mut UnsizedVec<T>,
     index: usize,
@@ -1409,7 +1449,7 @@ impl<T> From<UnsizedVec<T>> for alloc_crate::vec::Vec<T> {
             alloc_crate::vec::Vec::from_raw_parts(
                 value.ptr.as_ptr().cast(),
                 value.len(),
-                value.cap / mem::size_of::<T>(),
+                value.cap.checked_div(mem::size_of::<T>()).unwrap_or(0),
             )
         };
 
