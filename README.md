@@ -38,3 +38,9 @@ dbg!(&*popped);
 
 assert_eq!(vec.len(), 1);
 ```
+
+## License
+
+`unsized-vec` is distributed under the terms of both the MIT license and the Apache License (Version 2.0).
+
+See [LICENSE-APACHE](LICENSE-APACHE) and [LICENSE-MIT](LICENSE-MIT) for details.
