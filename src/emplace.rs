@@ -53,47 +53,58 @@ impl<T: ?Sized> Emplacer<T> {
     }
 }
 
-/// Helper to ensure `box_new_with` doesn't leak memory
-/// if the unsized-value-returning function panics.
-///
-/// Deallocates the contained pointer when dropped.
-/// Must be costructed with a pointer returned by
-/// `alloc::alloc`, and `layout` must be the same
-/// as was passed to the `alloc` call.
-/// Must `mem::forget` the struct to avoid deallocating
-/// its memory.
-struct PointerDeallocer {
-    ptr: *mut u8,
-    layout: Layout,
-}
-
-impl Drop for PointerDeallocer {
-    fn drop(&mut self) {
-        unsafe { alloc::dealloc(self.ptr, self.layout) }
-    }
-}
-
 /// Run the given function, and return its result emplaced into a `Box`.
 pub fn box_new_with<T: ?Sized>(unsized_ret: impl FnOnce(&mut Emplacer<T>)) -> Box<T> {
+    /// Helper to ensure `box_new_with` doesn't leak memory
+    /// if the unsized-value-returning function panics.
+    ///
+    /// Deallocates the contained pointer when dropped.
+    /// Must be costructed with a pointer returned by
+    /// `alloc::alloc`, and `layout` must be the same
+    /// as was passed to the `alloc` call.
+    /// Must `mem::forget` the struct to avoid deallocating
+    /// its memory.
+    struct PointerDeallocer {
+        ptr: *mut u8,
+        layout: Layout,
+    }
+
+    impl Drop for PointerDeallocer {
+        fn drop(&mut self) {
+            if self.layout.size() != 0 {
+                // Safety: if layout is non-zero then this pointer
+                // should have been allocated with this layout
+                unsafe { alloc::dealloc(self.ptr, self.layout) }
+            }
+        }
+    }
+
     let mut uninit_box = MaybeUninit::uninit();
     let mut initialized: bool = false;
 
-    let closure = &mut |layout, meta, closure: &mut dyn FnMut(*mut PhantomData<T>)| {
+    let closure = &mut |layout: Layout, meta, closure: &mut dyn FnMut(*mut PhantomData<T>)| {
         // If `closure` panics and triggers an unwind,
         // this will be dropped, which will call `dealloc` on `ptr`
         // and ensure no memory is leaked.
         let deallocer = PointerDeallocer {
-            ptr: unsafe { alloc::alloc(layout) },
+            ptr: if layout.size() == 0 {
+                crate::DANGLING_PERFECT_ALIGN.as_ptr().cast()
+            } else {
+                // Safety: just checked that layout is not zero-sized
+                unsafe { alloc::alloc(layout) }
+            },
             layout,
         };
 
         if deallocer.ptr.is_null() {
+            // Don't want to deallocate a raw pointer
             mem::forget(deallocer);
             alloc::handle_alloc_error(layout);
         }
 
         closure(deallocer.ptr.cast());
 
+        // Safety: Pointer either is to 0-sized allocation or comes from global allocator
         let init_box =
             unsafe { Box::from_raw(ptr::from_raw_parts_mut(deallocer.ptr.cast::<()>(), meta)) };
 

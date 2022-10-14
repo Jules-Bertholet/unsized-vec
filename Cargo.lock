@@ -10,7 +10,7 @@ checksum = "728eb6351430bccb993660dfffc5a72f91ccc1295abaa8ce19b27ebe4f75568b"
 
 [[package]]
 name = "unsized-vec"
-version = "0.0.1-alpha.8"
+version = "0.0.1-alpha.9"
 dependencies = [
  "serde",
 ]
