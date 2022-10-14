@@ -270,7 +270,7 @@ pub struct UnsizedVec<T: ?Sized> {
     cap: usize,
     metadata: alloc_crate::vec::Vec<MetadataStorage<T>>,
     align: <T as StoreAlign>::AlignStore,
-    _marker: PhantomData<(*mut T, T)>,
+    _marker: PhantomData<T>,
 }
 
 unsafe impl<T: ?Sized + Send> Send for UnsizedVec<T> {}
