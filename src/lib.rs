@@ -124,11 +124,17 @@ trait OffsetNextRemainder<T: ?Sized>: Copy + Send + Sync + Ord + Hash + Unpin {
     #[must_use]
     fn to_offset_next(self, index: usize) -> usize;
 
+    /// # Safety
+    ///
+    /// `self + sub` must not overflow
     #[must_use]
-    fn add(self, add: usize) -> Self;
+    unsafe fn unchecked_add(self, add: usize) -> Self;
 
+    /// # Safety
+    ///
+    /// `self - sub` must not underflow
     #[must_use]
-    fn sub(self, sub: usize) -> Self;
+    unsafe fn unchecked_sub(self, sub: usize) -> Self;
 }
 
 impl<T: ?Sized> OffsetNextRemainder<T> for usize {
@@ -143,13 +149,15 @@ impl<T: ?Sized> OffsetNextRemainder<T> for usize {
     }
 
     #[inline]
-    fn add(self, add: usize) -> Self {
-        self + add
+    unsafe fn unchecked_add(self, add: usize) -> Self {
+        // Safety: precondition of the functuon
+        unsafe { self.unchecked_add(add) }
     }
 
     #[inline]
-    fn sub(self, sub: usize) -> Self {
-        self - sub
+    unsafe fn unchecked_sub(self, sub: usize) -> Self {
+        // Safety: precondition of the functuon
+        unsafe { self.unchecked_sub(sub) }
     }
 }
 
@@ -163,10 +171,10 @@ impl<T> OffsetNextRemainder<T> for () {
     }
 
     #[inline]
-    fn add(self, _: usize) {}
+    unsafe fn unchecked_add(self, _: usize) {}
 
     #[inline]
-    fn sub(self, _: usize) {}
+    unsafe fn unchecked_sub(self, _: usize) {}
 }
 
 /// Used by `UnsizedVec` to only have one heap allocation when storing `Sized` values.
@@ -677,22 +685,10 @@ impl<T: ?Sized> UnsizedVec<T> {
         Some(unsafe { self.align.unchecked_align_offset_to(offset_next) })
     }
 
-    /// Insert element into vec at given index, shifting following elements to the right.
+    /// # Safety
     ///
-    /// # Panics
-    ///
-    /// Panics if `index > self.len()`.
-    pub fn insert(&mut self, index: usize, elem: T) {
-        // Bounds check
-        match index.cmp(&self.len()) {
-            cmp::Ordering::Less => {}
-            cmp::Ordering::Equal => {
-                self.push(elem);
-                return;
-            }
-            cmp::Ordering::Greater => panic!("index > self.len()"),
-        }
-
+    /// `index` must be strictly less than `self.len()`.
+    unsafe fn unchecked_insert_inner(&mut self, index: usize, elem: T) {
         let size_of_val = mem::size_of_val(&elem);
         let align_of_val = helper::align_of_val(&elem);
 
@@ -718,12 +714,14 @@ impl<T: ?Sized> UnsizedVec<T> {
 
         // Update offsets of follwing elements.
         // Unwinding is UB starting here until end of function !!!;
-        // Safety: bounds checked already at top of function
+        // Safety: safety precondition of this function
         for ms in unsafe { self.metadata.get_unchecked_mut(index..) } {
-            ms.offset_next_remainder = ms.offset_next_remainder.add(aligned_size_of_val);
+            // Safety: addition can't overflow because that would mean that the memory allocation overflowed
+            ms.offset_next_remainder =
+                unsafe { ms.offset_next_remainder.unchecked_add(aligned_size_of_val) };
         }
 
-        // Safety: bounds checked already at top of function
+        // Safety: safety precondition of this function
         let offset_start = unsafe { self.offset_start_idx(index).unwrap_unchecked() };
 
         // Shift right and copy element to end of allocation.
@@ -758,6 +756,21 @@ impl<T: ?Sized> UnsizedVec<T> {
                 ),
             },
         );
+    }
+
+    /// Insert element into vec at given index, shifting following elements to the right.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index > self.len()`.
+    #[inline]
+    pub fn insert(&mut self, index: usize, elem: T) {
+        // Inline the bounds check, but not the rest
+        match index.cmp(&self.len()) {
+            cmp::Ordering::Less => unsafe { self.unchecked_insert_inner(index, elem) },
+            cmp::Ordering::Equal => self.push(elem),
+            cmp::Ordering::Greater => panic!("index > self.len()"),
+        };
     }
 
     /// Remove an element from the end of the vec.
@@ -823,15 +836,23 @@ impl<T: ?Sized> UnsizedVec<T> {
             metadata_remainder,
             offset_next_remainder: offset_end_remainder,
         } = self.metadata.remove(index);
-        let offset_start = self.offset_start_idx(index).unwrap();
+
+        // Our metadata is incorrect, so unwind is now UB !!!
+
+        // Safety: `remove` call above would have panicked if this indexing could fail
+        let offset_start = unsafe { self.offset_start_idx(index).unwrap_unchecked() };
         let offset_end = offset_end_remainder.to_offset_next(index);
         let size_of_val = offset_end - offset_start;
         let aligned_size_of_val = size_of_val.next_multiple_of(self.align.to_align().into());
         let metadata = metadata_remainder.to_metadata(size_of_val);
 
         // Update offsets of follwing elements
-        for ms in &mut self.metadata[index..] {
-            ms.offset_next_remainder = ms.offset_next_remainder.sub(aligned_size_of_val);
+        // Safety: `remove` call performed a bounds check already
+        for ms in unsafe { self.metadata.get_unchecked_mut(index..) } {
+            // Safety: subtraction can't overflow because that would mean that the offset we are adjusting
+            // is for an element before the one we are removing
+            ms.offset_next_remainder =
+                unsafe { ms.offset_next_remainder.unchecked_sub(aligned_size_of_val) };
         }
 
         // Safety: offset computed above is within the `Vec`'s allocation
@@ -1277,7 +1298,7 @@ pub struct UnsizedVecIterMut<'a, T: ?Sized + 'a> {
     index: usize,
 }
 
-impl<'a, T: ?Sized + 'a> Iterator for UnsizedVecIterMut<'a, T> {
+impl<'a, T: ?Sized> Iterator for UnsizedVecIterMut<'a, T> {
     type Item = &'a mut T;
 
     #[inline]
@@ -1387,18 +1408,6 @@ macro_rules! unsized_vec {
             ret
         }
     );
-}
-
-#[export_name = "a"]
-fn a() -> for<'a> fn(
-    &'a UnsizedVec<(dyn core::fmt::Debug + 'static)>,
-) -> <(dyn core::fmt::Debug + 'static) as marker::StoreAlign>::AlignStore {
-    UnsizedVec::<dyn Debug>::max_align_of_elements
-}
-
-#[export_name = "b"]
-fn b() -> for<'a> fn(&'a mut UnsizedVec<[u32]>, usize) {
-    UnsizedVec::<[u32]>::shrink_align_to
 }
 
 #[cfg(feature = "serde")]
