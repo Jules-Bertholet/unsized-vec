@@ -43,6 +43,8 @@ impl<T: ?Sized> Emplacer<T> {
     /// If you unwrap this `Emplacer` and call the resulting closure, you must ensure
     /// that the closure you pass in writes a valid value of type `T` to the passed-in pointer
     /// (or panics, or runs forever, or exits without returning in some other otherwise-sound way).
+    ///
+    /// The value you write must also correspond to the layout and pointer metadata you pass in.
     pub unsafe fn into_inner(
         &mut self,
     ) -> &mut dyn FnMut(Layout, <T as Pointee>::Metadata, &mut dyn FnMut(*mut PhantomData<T>)) {
@@ -85,7 +87,13 @@ pub fn box_new_with<T: ?Sized>(unsized_ret: impl FnOnce(&mut Emplacer<T>)) -> Bo
             layout,
         };
 
+        if deallocer.ptr.is_null() {
+            mem::forget(deallocer);
+            alloc::handle_alloc_error(layout);
+        }
+
         closure(deallocer.ptr.cast());
+
         let init_box =
             unsafe { Box::from_raw(ptr::from_raw_parts_mut(deallocer.ptr.cast::<()>(), meta)) };
 
