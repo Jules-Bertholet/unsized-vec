@@ -9,8 +9,14 @@ license = "MIT OR Apache-2.0"
 keywords = ["vec", "vector", "unsized"]
 categories = ["data-structures", "no-std"]
 
+[workspace]
+members = ["emplacable"]
+
 [dependencies]
-serde = { version = "1.0.145", optional = true, default-features = false }
+emplacable = { path = "emplacable", version = "0.1.0-alpha.1", default-features = false, features = [
+    "alloc",
+] }
+serde = { version = "1.0.147", optional = true, default-features = false }
 
 [package.metadata.docs.rs]
 all-features = true

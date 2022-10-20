@@ -2,41 +2,49 @@
 
 [![docs.rs](https://img.shields.io/docsrs/unsized-vec)](https://docs.rs/unsized-vec/) [![Crates.io](https://img.shields.io/crates/v/unsized-vec)](https://crates.io/crates/unsized-vec)
 
+Say goodbye to `Vec<Box<dyn Any>>`! Cut down on your heap allocations.
 `UnsizedVec<T>` is like [`Vec<T>`](https://doc.rust-lang.org/alloc/vec/struct.Vec.html), but `T` can be `?Sized`.
 
 ## Features
 
-- Similar API to `Vec`.
-- Same time complexity as `Vec` for indexing, push, pop, insert, remove (more or less)
-  - Exception: when `T`'s alignment isn't fixed at compile-time,
-    adding a new element to the `Vec` with a greater alignment than all elements currently present
-    will take $\mathcal{O}(n)$ time, and will most likely reallocate.
-- For `T: Sized`, only one heap allocation, approximately same memory layout as `Vec`.
-- For unsized `T`, two heap allocations (one for the elements, one for the pointer metadata).
+- Familiar `Vec` API.
+- Same time complexity as `alloc::vec::Vec` for major operations(indexing, push, pop, insert, remove).
+  - When `T`'s alignment is not known at compile time (e.g. `T` is a trait object), this rule has one expection,
+    explained in the crate docs.
+- For `T: Sized`, `UnsizedVec<T>` compiles to a newtype around `alloc::vec::Vec`, and can be trivially converted to/from it.
+- For unsized `T`, there are two heap allocations: one for the elements, and one for the pointer metadata.
 - `#[no_std]` (but requires `alloc`).
+
+## Drawbacks
+
+- Invariant in `T`.
 - Experimental, nightly-only.
 
 ## Example
 
 ```rust
 #![feature(unsized_fn_params)]
+
 use core::fmt::Debug;
-use unsized_vec::{*, emplace::box_new_with};
 
-// `Box::new()` necessary only to coerce the values to trait objects.
-let obj: Box<dyn Debug> = Box::new(1);
-let obj_2: Box<dyn Debug> = Box::new((97_u128, "oh noes"));
-let mut vec: UnsizedVec<dyn Debug> = unsized_vec![*obj, *obj_2];
-for traitobj in &vec {
-    dbg!(traitobj);
-};
+use emplacable::box_new_with;
+use unsized_vec::{unsize_vec, UnsizedVec};
 
-assert_eq!(vec.len(), 2);
+fn main() {
+    let mut vec: UnsizedVec<dyn Debug> = unsize_vec![27.53_f32, "oh the places we'll go", Some(())];
 
-let popped = box_new_with(|e| vec.pop_unwrap(e));
-dbg!(&*popped);
+    for traitobj in &vec {
+        dbg!(traitobj);
+    };
 
-assert_eq!(vec.len(), 1);
+    assert_eq!(vec.len(), 3);
+
+    let maybe_popped: Option<Box<dyn Debug>> = vec.pop_into().map(box_new_with);
+    let popped = maybe_popped.unwrap();
+    dbg!(&*popped);
+
+    assert_eq!(vec.len(), 2);
+}
 ```
 
 ## License

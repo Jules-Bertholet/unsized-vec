@@ -12,11 +12,14 @@ jobs:
   test:
     runs-on: ubuntu-latest
 
+    env:
+      RUSTFLAGS: -D warnings
+
     steps:
       - uses: actions/checkout@v3
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
           target: x86_64-unknown-linux-gnu
@@ -29,13 +32,13 @@ jobs:
         run: cargo fmt --all --check
 
       - name: Run tests in relase mode
-        run: cargo test --release
+        run: cargo test --all --release
 
       - name: Run tests with careful
-        run: cargo careful test
+        run: cargo careful test --all
 
       - name: Run clippy
-        run: cargo clippy --message-format=json | clippy-sarif | tee rust-clippy-results.sarif | sarif-fmt
+        run: cargo clippy --all --message-format=json | clippy-sarif | tee rust-clippy-results.sarif | sarif-fmt
 
       - name: Upload clippy analysis results to GitHub
         uses: github/codeql-action/upload-sarif@v2
