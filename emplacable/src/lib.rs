@@ -101,6 +101,7 @@ use alloc_crate::{
     alloc::{self, handle_alloc_error},
     boxed::Box,
     rc::Rc,
+    string::String,
     sync::Arc,
     vec::Vec,
 };
@@ -1417,6 +1418,7 @@ where
     C: EmplacableFn<[T]>,
 {
     /// Turns this emplacer for a slice of `T`s into an owned [`Vec<T>`].
+    #[cfg(feature = "alloc")]
     #[inline]
     pub fn into_vec(self) -> Vec<T> {
         self.into()
@@ -1444,19 +1446,34 @@ where
     where
         I: IntoIterator<Item = Emplacable<T, C>>,
     {
-        fn from_iter_inner<T, C: EmplacableFn<T>, I: Iterator<Item = Emplacable<T, C>>>(
+        let mut vec = Vec::new();
+        vec.extend(iter);
+        vec
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl<T, C> Extend<Emplacable<T, C>> for Vec<T>
+where
+    C: EmplacableFn<T>,
+{
+    #[inline]
+    fn extend<I>(&mut self, iter: I)
+    where
+        I: IntoIterator<Item = Emplacable<T, C>>,
+    {
+        fn extend_inner<T, C: EmplacableFn<T>, I: Iterator<Item = Emplacable<T, C>>>(
+            vec: &mut Vec<T>,
             iter: I,
-        ) -> Vec<T> {
-            let mut vec: Vec<T> = Vec::with_capacity(iter.size_hint().0);
+        ) {
+            vec.reserve_exact(iter.size_hint().0);
 
             for emplacable in iter {
                 vec.push(emplacable.get());
             }
-
-            vec
         }
 
-        from_iter_inner(iter.into_iter())
+        extend_inner(self, iter.into_iter());
     }
 }
 
@@ -1467,15 +1484,16 @@ where
     /// Turns this emplacer for a string slice into an owned, heap-allocated [`String`].
     ///
     /// [`String`]: alloc_crate::string::String
+    #[cfg(feature = "alloc")]
     #[must_use]
     #[inline]
-    pub fn into_string(self) -> alloc_crate::string::String {
+    pub fn into_string(self) -> String {
         self.into()
     }
 }
 
 #[cfg(feature = "alloc")]
-impl<C> From<Emplacable<str, C>> for alloc_crate::string::String
+impl<C> From<Emplacable<str, C>> for String
 where
     C: EmplacableFn<str>,
 {

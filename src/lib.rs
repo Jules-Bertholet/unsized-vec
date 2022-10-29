@@ -1388,17 +1388,33 @@ where
     where
         I: IntoIterator<Item = Emplacable<T, C>>,
     {
-        fn from_iter_inner<T: ?Sized, C: EmplacableFn<T>, I: Iterator<Item = Emplacable<T, C>>>(
+        let mut vec = UnsizedVec::new();
+        vec.extend(iter);
+        vec
+    }
+}
+
+impl<T, C> Extend<Emplacable<T, C>> for UnsizedVec<T>
+where
+    T: ?Sized,
+    C: EmplacableFn<T>,
+{
+    #[inline]
+    fn extend<I>(&mut self, iter: I)
+    where
+        I: IntoIterator<Item = Emplacable<T, C>>,
+    {
+        fn extend_inner<T: ?Sized, C: EmplacableFn<T>, I: Iterator<Item = Emplacable<T, C>>>(
+            vec: &mut UnsizedVec<T>,
             iter: I,
-        ) -> UnsizedVec<T> {
-            let mut vec = UnsizedVec::with_capacity(iter.size_hint().0);
+        ) {
+            vec.reserve_exact(iter.size_hint().0);
             for emplacable in iter {
                 vec.push_with(emplacable);
             }
-            vec
         }
 
-        from_iter_inner(iter.into_iter())
+        extend_inner(self, iter.into_iter());
     }
 }
 
