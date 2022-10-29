@@ -57,7 +57,7 @@
 //! ## A note on examples
 //!
 //! This crate has very few examples, as it provides tools to work with unsized types
-//! but no fun things that use the tools. If you want usage sensible examples,
+//! but no fun things that use the tools. If you want more usage examples,
 //! check out `unsized-vec`'s documentation and the `examples` folder on GitHub.
 //!
 //! [`Unsize`]: core::marker::Unsize
