@@ -102,6 +102,7 @@ use alloc_crate::{
     boxed::Box,
     rc::Rc,
     sync::Arc,
+    vec::Vec,
 };
 use core::{
     alloc::{AllocError, Allocator, Layout},
@@ -542,82 +543,94 @@ where
     /// be an [`ExactSizeIterator`]. If `ExactSizeIterator` is incorrectly implemented,
     /// this function may panic or otherwise misbehave (but will not trigger UB).
     #[allow(clippy::should_implement_trait)] // We only take `ExactSizeIterator`s
+    #[inline]
     pub fn from_iter<I>(iter: I) -> Emplacable<[T], impl EmplacableFn<[T]>>
     where
         T: Sized,
         I: IntoIterator<Item = Self>,
         I::IntoIter: ExactSizeIterator,
     {
-        let emplacables_iter = iter.into_iter();
-        let len = emplacables_iter.len();
+        fn from_iter_inner<
+            T,
+            C: EmplacableFn<T>,
+            I: Iterator<Item = Emplacable<T, C>> + ExactSizeIterator,
+        >(
+            iter: I,
+        ) -> Emplacable<[T], impl EmplacableFn<[T]>> {
+            let len = iter.len();
 
-        // Panics if size overflows `isize::MAX`.
-        let layout = Layout::from_size_align(
-            mem::size_of::<T>().checked_mul(len).unwrap(),
-            mem::align_of::<T>(),
-        )
-        .unwrap();
+            // Panics if size overflows `isize::MAX`.
+            let layout = Layout::from_size_align(
+                mem::size_of::<T>().checked_mul(len).unwrap(),
+                mem::align_of::<T>(),
+            )
+            .unwrap();
 
-        let slice_emplacer_closure = move |slice_emplacer: &mut Emplacer<[T]>| {
-            // Move ite into closure
-            let emplacables_iter = emplacables_iter;
+            let slice_emplacer_closure = move |slice_emplacer: &mut Emplacer<[T]>| {
+                // Move ite into closure
+                let emplacables_iter = iter;
 
-            // SAFETY: we fulfill the preconditions
-            let slice_emplacer_fn = unsafe { slice_emplacer.into_inner() };
+                // SAFETY: we fulfill the preconditions
+                let slice_emplacer_fn = unsafe { slice_emplacer.into_inner() };
 
-            slice_emplacer_fn(layout, len, &mut |arr_out_ptr: *mut PhantomData<[T]>| {
-                if !arr_out_ptr.is_null() {
-                    let elem_emplacables: I::IntoIter =
-                        // SAFETY: this "inner closure" can only be called once,
-                        // per preconditions of `Emplacer::new`.
-                        // we `mem::forget` `elem_emplacables` below to avoid double-drop.
-                        unsafe { ptr::read(&emplacables_iter) };
+                slice_emplacer_fn(layout, len, &mut |arr_out_ptr: *mut PhantomData<[T]>| {
+                    if !arr_out_ptr.is_null() {
+                        let elem_emplacables: I =
+                            // SAFETY: this "inner closure" can only be called once,
+                            // per preconditions of `Emplacer::new`.
+                            // we `mem::forget` `elem_emplacables` below to avoid double-drop.
+                            unsafe { ptr::read(&emplacables_iter) };
 
-                    // We can't trust `ExactSizeIterator`'s `len()`,
-                    // so we keep track of how many
-                    // elements were actually returned.
-                    let mut num_elems_copied: usize = 0;
+                        // We can't trust `ExactSizeIterator`'s `len()`,
+                        // so we keep track of how many
+                        // elements were actually returned.
+                        let mut num_elems_copied: usize = 0;
 
-                    let indexed_elem_emplacables = (0..len).zip(elem_emplacables);
-                    indexed_elem_emplacables.for_each(|(index, elem_emplacable)| {
-                        let elem_emplacable_closure = elem_emplacable.into_closure();
-                        let elem_emplacer_closure = &mut move |
-                                _: Layout,
-                                (),
-                                inner_closure: &mut dyn FnMut(*mut PhantomData<T>),
-                            | {
-                                // SAFETY: by fn precondition
-                                inner_closure(unsafe { arr_out_ptr.cast::<T>().add(index).cast() });
-                            };
+                        let indexed_elem_emplacables = (0..len).zip(elem_emplacables);
+                        indexed_elem_emplacables.for_each(|(index, elem_emplacable)| {
+                            let elem_emplacable_closure = elem_emplacable.into_closure();
+                            let elem_emplacer_closure = &mut move |
+                                    _: Layout,
+                                    (),
+                                    inner_closure: &mut dyn FnMut(*mut PhantomData<T>),
+                                | {
+                                    // SAFETY: by fn precondition
+                                    inner_closure(unsafe { arr_out_ptr.cast::<T>().add(index).cast() });
+                                };
 
-                        // SAFETY: `elem_emplacer_closure` passes a pointer with the correct offset from the
-                        // start of the allocation
-                        let elem_emplacer = unsafe { Emplacer::new(elem_emplacer_closure) };
-                        elem_emplacable_closure(elem_emplacer);
+                            // SAFETY: `elem_emplacer_closure` passes a pointer with the correct offset from the
+                            // start of the allocation
+                            let elem_emplacer = unsafe { Emplacer::new(elem_emplacer_closure) };
+                            elem_emplacable_closure(elem_emplacer);
 
-                        num_elems_copied += 1;
-                    });
+                            num_elems_copied += 1;
+                        });
 
-                    assert_eq!(num_elems_copied, len);
-                } else {
-                    let emplacables_iter: I::IntoIter =
-                        // SAFETY: this "inner closure" can only be called once,
-                        // per preconditions of `Emplacer::new`.
-                        // we `mem::forget` `elem_emplacables` below to avoid double-drop.
-                        unsafe { ptr::read(&emplacables_iter) };
+                        assert_eq!(num_elems_copied, len);
+                    } else {
+                        let emplacables_iter: I =
+                            // SAFETY: this "inner closure" can only be called once,
+                            // per preconditions of `Emplacer::new`.
+                            // we `mem::forget` `elem_emplacables` below to avoid double-drop.
+                            unsafe { ptr::read(&emplacables_iter) };
 
-                    for _emplacable in emplacables_iter {
-                        // drop `emplacable`
+                        for _emplacable in emplacables_iter {
+                            // drop `emplacable`
+                        }
                     }
-                }
-            });
+                });
 
-            // avoid double-drop
-            mem::forget(emplacables_iter);
-        };
+                // avoid double-drop
+                mem::forget(emplacables_iter);
+            };
 
-        // SAFETY: `closure` properly emplaces `val`
-        unsafe { Emplacable::from_closure(slice_emplacer_closure) }
+            // SAFETY: `closure` properly emplaces `val`
+            unsafe { Emplacable::from_closure(slice_emplacer_closure) }
+        }
+
+        let emplacables_iter = iter.into_iter();
+
+        from_iter_inner(emplacables_iter)
     }
 }
 
@@ -1027,7 +1040,7 @@ impl<T> From<Box<T>> for Emplacable<T, <Box<T> as IntoEmplacable<T>>::Closure> {
 }
 
 #[cfg(feature = "alloc")]
-impl<T> IntoEmplacable<[T]> for alloc_crate::vec::Vec<T> {
+impl<T> IntoEmplacable<[T]> for Vec<T> {
     type Closure = impl EmplacableFn<[T]>;
 
     fn into_emplacable(mut self) -> Emplacable<[T], Self::Closure> {
@@ -1073,12 +1086,10 @@ impl<T> IntoEmplacable<[T]> for alloc_crate::vec::Vec<T> {
 }
 
 #[cfg(feature = "alloc")]
-impl<T> From<alloc_crate::vec::Vec<T>>
-    for Emplacable<[T], <alloc_crate::vec::Vec<T> as IntoEmplacable<[T]>>::Closure>
-{
+impl<T> From<Vec<T>> for Emplacable<[T], <Vec<T> as IntoEmplacable<[T]>>::Closure> {
     #[inline]
-    fn from(value: alloc_crate::vec::Vec<T>) -> Self {
-        <alloc_crate::vec::Vec<T> as IntoEmplacable<[T]>>::into_emplacable(value)
+    fn from(value: Vec<T>) -> Self {
+        <Vec<T> as IntoEmplacable<[T]>>::into_emplacable(value)
     }
 }
 
@@ -1406,22 +1417,46 @@ where
     C: EmplacableFn<[T]>,
 {
     /// Turns this emplacer for a slice of `T`s into an owned [`Vec<T>`].
-    ///
-    /// [`Vec<T>`]: alloc_crate::vec::Vec
     #[inline]
-    pub fn into_vec(self) -> alloc_crate::vec::Vec<T> {
+    pub fn into_vec(self) -> Vec<T> {
         self.into()
     }
 }
 
 #[cfg(feature = "alloc")]
-impl<T, C> From<Emplacable<[T], C>> for alloc_crate::vec::Vec<T>
+impl<T, C> From<Emplacable<[T], C>> for Vec<T>
 where
     C: EmplacableFn<[T]>,
 {
     #[inline]
     fn from(emplacable: Emplacable<[T], C>) -> Self {
         box_new_with(emplacable).into_vec()
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl<T, C> FromIterator<Emplacable<T, C>> for Vec<T>
+where
+    C: EmplacableFn<T>,
+{
+    #[inline]
+    fn from_iter<I>(iter: I) -> Self
+    where
+        I: IntoIterator<Item = Emplacable<T, C>>,
+    {
+        fn from_iter_inner<T, C: EmplacableFn<T>, I: Iterator<Item = Emplacable<T, C>>>(
+            iter: I,
+        ) -> Vec<T> {
+            let mut vec: Vec<T> = Vec::with_capacity(iter.size_hint().0);
+
+            for emplacable in iter {
+                vec.push(emplacable.get());
+            }
+
+            vec
+        }
+
+        from_iter_inner(iter.into_iter())
     }
 }
 

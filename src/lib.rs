@@ -255,7 +255,10 @@ type SizeTypeFor<T> = <<T as UnsizedVecImpl>::Impl as UnsizedVecProvider<T>>::Si
 /// [`pop_into`]: UnsizedVec::pop_into
 /// [`remove_into`]: UnsizedVec::remove_into
 #[repr(transparent)]
-pub struct UnsizedVec<T: ?Sized> {
+pub struct UnsizedVec<T>
+where
+    T: ?Sized,
+{
     inner: <T as UnsizedVecImpl>::Impl,
 }
 
@@ -804,7 +807,10 @@ impl<T: ?Sized> UnsizedVec<T> {
     /// dbg!(&vec[0]);
     /// ```
     #[inline]
-    pub fn insert_unsize<S: Unsize<T>>(&mut self, index: usize, value: S) {
+    pub fn insert_unsize<S>(&mut self, index: usize, value: S)
+    where
+        S: Unsize<T>,
+    {
         self.insert(index, unsize!(value, (S) -> T));
     }
 
@@ -1138,9 +1144,10 @@ impl<T: ?Sized> UnsizedVec<T> {
     /// ```
     #[must_use]
     #[inline]
-    pub fn unsize<U: ?Sized>(self) -> UnsizedVec<U>
+    pub fn unsize<U>(self) -> UnsizedVec<U>
     where
         T: Sized + Unsize<U>,
+        U: ?Sized,
     {
         UnsizedVec {
             inner: <U as UnsizedVecImpl>::Impl::from_sized(self.inner),
@@ -1148,7 +1155,10 @@ impl<T: ?Sized> UnsizedVec<T> {
     }
 }
 
-impl<T: ?Sized> Default for UnsizedVec<T> {
+impl<T> Default for UnsizedVec<T>
+where
+    T: ?Sized,
+{
     #[inline]
     fn default() -> Self {
         Self::new()
@@ -1157,13 +1167,19 @@ impl<T: ?Sized> Default for UnsizedVec<T> {
 
 /// The iterator returned by [`UnsizedVec::iter`].
 #[repr(transparent)]
-pub struct UnsizedIter<'a, T: ?Sized + 'a> {
+pub struct UnsizedIter<'a, T>
+where
+    T: ?Sized + 'a,
+{
     inner: <<T as UnsizedVecImpl>::Impl as UnsizedVecProvider<T>>::Iter<'a>,
 }
 
 /// The iterator returned by [`UnsizedVec::iter_mut`].
 #[repr(transparent)]
-pub struct UnsizedIterMut<'a, T: ?Sized + 'a> {
+pub struct UnsizedIterMut<'a, T>
+where
+    T: ?Sized + 'a,
+{
     inner: <<T as UnsizedVecImpl>::Impl as UnsizedVecProvider<T>>::IterMut<'a>,
 }
 
@@ -1181,7 +1197,10 @@ impl<T> From<UnsizedVec<T>> for ::alloc::vec::Vec<T> {
     }
 }
 
-impl<T: ?Sized> Index<usize> for UnsizedVec<T> {
+impl<T> Index<usize> for UnsizedVec<T>
+where
+    T: ?Sized,
+{
     type Output = T;
 
     #[inline]
@@ -1190,21 +1209,30 @@ impl<T: ?Sized> Index<usize> for UnsizedVec<T> {
     }
 }
 
-impl<T: ?Sized> IndexMut<usize> for UnsizedVec<T> {
+impl<T> IndexMut<usize> for UnsizedVec<T>
+where
+    T: ?Sized,
+{
     #[inline]
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
         self.get_mut(index).expect("index out of range")
     }
 }
 
-impl<'a, T: 'a> From<core::slice::Iter<'a, T>> for UnsizedIter<'a, T> {
+impl<'a, T> From<core::slice::Iter<'a, T>> for UnsizedIter<'a, T>
+where
+    T: 'a,
+{
     #[inline]
     fn from(value: core::slice::Iter<'a, T>) -> Self {
         UnsizedIter { inner: value }
     }
 }
 
-impl<'a, T: 'a> From<UnsizedIter<'a, T>> for core::slice::Iter<'a, T> {
+impl<'a, T> From<UnsizedIter<'a, T>> for core::slice::Iter<'a, T>
+where
+    T: 'a,
+{
     #[inline]
     fn from(value: UnsizedIter<'a, T>) -> Self {
         value.inner
@@ -1213,7 +1241,10 @@ impl<'a, T: 'a> From<UnsizedIter<'a, T>> for core::slice::Iter<'a, T> {
 
 macro_rules! iter_ref {
     ($iter_ty:ident $($muta:ident)?) => {
-        impl<'a, T: ?Sized + 'a> Iterator for $iter_ty<'a, T> {
+        impl<'a, T> Iterator for $iter_ty<'a, T>
+        where
+            T: ?Sized + 'a,
+        {
             type Item = &'a $($muta)? T;
 
             #[inline]
@@ -1227,10 +1258,7 @@ macro_rules! iter_ref {
             }
 
             #[inline]
-            fn count(self) -> usize
-            where
-                Self: Sized,
-            {
+            fn count(self) -> usize {
                 self.inner.count()
             }
 
@@ -1240,17 +1268,13 @@ macro_rules! iter_ref {
             }
 
             #[inline]
-            fn last(self) -> Option<Self::Item>
-            where
-                Self: Sized,
-            {
+            fn last(self) -> Option<Self::Item> {
                 self.inner.last()
             }
 
             #[inline]
             fn for_each<F>(self, f: F)
             where
-                Self: Sized,
                 F: FnMut(Self::Item),
             {
                 self.inner.for_each(f);
@@ -1259,7 +1283,6 @@ macro_rules! iter_ref {
             #[inline]
             fn all<F>(&mut self, f: F) -> bool
             where
-                Self: Sized,
                 F: FnMut(Self::Item) -> bool,
             {
                 self.inner.all(f)
@@ -1268,7 +1291,6 @@ macro_rules! iter_ref {
             #[inline]
             fn any<F>(&mut self, f: F) -> bool
             where
-                Self: Sized,
                 F: FnMut(Self::Item) -> bool,
             {
                 self.inner.any(f)
@@ -1277,7 +1299,6 @@ macro_rules! iter_ref {
             #[inline]
             fn find<P>(&mut self, predicate: P) -> Option<Self::Item>
             where
-                Self: Sized,
                 P: FnMut(&Self::Item) -> bool,
             {
                 self.inner.find(predicate)
@@ -1286,7 +1307,6 @@ macro_rules! iter_ref {
             #[inline]
             fn find_map<B, F>(&mut self, f: F) -> Option<B>
             where
-                Self: Sized,
                 F: FnMut(Self::Item) -> Option<B>,
             {
                 self.inner.find_map(f)
@@ -1295,14 +1315,16 @@ macro_rules! iter_ref {
             #[inline]
             fn position<P>(&mut self, predicate: P) -> Option<usize>
             where
-                Self: Sized,
                 P: FnMut(Self::Item) -> bool,
             {
                 self.inner.position(predicate)
             }
         }
 
-        impl<'a, T: ?Sized + 'a> DoubleEndedIterator for $iter_ty<'a, T> {
+        impl<'a, T> DoubleEndedIterator for $iter_ty<'a, T>
+        where
+            T: ?Sized + 'a,
+        {
             #[inline]
             fn next_back(&mut self) -> Option<Self::Item> {
                 self.inner.next_back()
@@ -1314,15 +1336,24 @@ macro_rules! iter_ref {
             }
         }
 
-        impl<'a, T: ?Sized + 'a> ExactSizeIterator for $iter_ty<'a, T> {}
-        impl<'a, T: ?Sized + 'a> FusedIterator for $iter_ty<'a, T> {}
+        impl<'a, T> ExactSizeIterator for $iter_ty<'a, T>
+        where
+            T: ?Sized + 'a,
+        {}
+        impl<'a, T> FusedIterator for $iter_ty<'a, T>
+        where
+            T: ?Sized + 'a,
+        {}
     }
 }
 
 iter_ref!(UnsizedIter);
 iter_ref!(UnsizedIterMut mut);
 
-impl<'a, T: ?Sized + 'a> IntoIterator for &'a UnsizedVec<T> {
+impl<'a, T> IntoIterator for &'a UnsizedVec<T>
+where
+    T: ?Sized + 'a,
+{
     type Item = &'a T;
 
     type IntoIter = UnsizedIter<'a, T>;
@@ -1333,7 +1364,10 @@ impl<'a, T: ?Sized + 'a> IntoIterator for &'a UnsizedVec<T> {
     }
 }
 
-impl<'a, T: ?Sized + 'a> IntoIterator for &'a mut UnsizedVec<T> {
+impl<'a, T> IntoIterator for &'a mut UnsizedVec<T>
+where
+    T: ?Sized + 'a,
+{
     type Item = &'a mut T;
 
     type IntoIter = UnsizedIterMut<'a, T>;
@@ -1344,14 +1378,44 @@ impl<'a, T: ?Sized + 'a> IntoIterator for &'a mut UnsizedVec<T> {
     }
 }
 
-impl<T: ?Sized + Debug> Debug for UnsizedVec<T> {
+impl<T, C> FromIterator<Emplacable<T, C>> for UnsizedVec<T>
+where
+    T: ?Sized,
+    C: EmplacableFn<T>,
+{
+    #[inline]
+    fn from_iter<I>(iter: I) -> Self
+    where
+        I: IntoIterator<Item = Emplacable<T, C>>,
+    {
+        fn from_iter_inner<T: ?Sized, C: EmplacableFn<T>, I: Iterator<Item = Emplacable<T, C>>>(
+            iter: I,
+        ) -> UnsizedVec<T> {
+            let mut vec = UnsizedVec::with_capacity(iter.size_hint().0);
+            for emplacable in iter {
+                vec.push_with(emplacable);
+            }
+            vec
+        }
+
+        from_iter_inner(iter.into_iter())
+    }
+}
+
+impl<T> Debug for UnsizedVec<T>
+where
+    T: ?Sized + Debug,
+{
     #[inline]
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.debug_list().entries(self.iter()).finish()
     }
 }
 
-impl<T: ?Sized + Clone> Clone for UnsizedVec<T> {
+impl<T> Clone for UnsizedVec<T>
+where
+    T: ?Sized + Clone,
+{
     #[inline]
     fn clone(&self) -> Self {
         let mut ret = UnsizedVec::with_capacity_bytes_align(
@@ -1366,16 +1430,24 @@ impl<T: ?Sized + Clone> Clone for UnsizedVec<T> {
     }
 }
 
-impl<T: ?Sized + PartialEq<U>, U: ?Sized> PartialEq<UnsizedVec<U>> for UnsizedVec<T> {
+impl<T, U> PartialEq<UnsizedVec<U>> for UnsizedVec<T>
+where
+    T: ?Sized + PartialEq<U>,
+    U: ?Sized,
+{
     #[inline]
     fn eq(&self, other: &UnsizedVec<U>) -> bool {
         self.len() == other.len() && self.iter().zip(other).all(|(l, r)| l == r)
     }
 }
 
-impl<T: ?Sized + Eq> Eq for UnsizedVec<T> {}
+impl<T> Eq for UnsizedVec<T> where T: ?Sized + Eq {}
 
-impl<T: ?Sized + PartialOrd<U>, U: ?Sized> PartialOrd<UnsizedVec<U>> for UnsizedVec<T> {
+impl<T, U> PartialOrd<UnsizedVec<U>> for UnsizedVec<T>
+where
+    T: ?Sized + PartialOrd<U>,
+    U: ?Sized,
+{
     fn partial_cmp(&self, other: &UnsizedVec<U>) -> Option<cmp::Ordering> {
         for (l, r) in self.iter().zip(other) {
             match l.partial_cmp(r) {
@@ -1387,7 +1459,10 @@ impl<T: ?Sized + PartialOrd<U>, U: ?Sized> PartialOrd<UnsizedVec<U>> for Unsized
     }
 }
 
-impl<T: ?Sized + Ord> Ord for UnsizedVec<T> {
+impl<T> Ord for UnsizedVec<T>
+where
+    T: ?Sized + Ord,
+{
     #[inline]
     fn cmp(&self, other: &Self) -> cmp::Ordering {
         for (l, r) in self.iter().zip(other) {
@@ -1400,7 +1475,10 @@ impl<T: ?Sized + Ord> Ord for UnsizedVec<T> {
     }
 }
 
-impl<T: ?Sized + Hash> Hash for UnsizedVec<T> {
+impl<T> Hash for UnsizedVec<T>
+where
+    T: ?Sized + Hash,
+{
     #[inline]
     fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
         for elem in self {
@@ -1413,7 +1491,10 @@ impl<T: ?Sized + Hash> Hash for UnsizedVec<T> {
 use serde::{ser::SerializeSeq, Serialize};
 
 #[cfg(feature = "serde")]
-impl<T: ?Sized + Serialize> Serialize for UnsizedVec<T> {
+impl<T> Serialize for UnsizedVec<T>
+where
+    T: ?Sized + Serialize,
+{
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
