@@ -113,7 +113,7 @@ use core::{
     mem::{self, ManuallyDrop, MaybeUninit},
     ops::FnMut,
     pin::Pin,
-    ptr::{self, addr_of, addr_of_mut, NonNull, Pointee},
+    ptr::{self, addr_of, NonNull, Pointee},
 };
 #[cfg(feature = "std")]
 use std::{ffi::OsStr, path::Path};
@@ -432,11 +432,11 @@ where
     /// a function like [`box_new_with`].
     #[must_use]
     #[inline]
-    pub fn into_closure(mut self) -> C {
-        // SAFETY: we `forget` self right after, so no double drop
-        let closure = unsafe { ManuallyDrop::take(&mut self.closure) };
-        mem::forget(self);
-        closure
+    pub fn into_closure(self) -> C {
+        let mut manually_drop_self = ManuallyDrop::new(self);
+
+        // SAFETY: `self` is in a `ManuallyDrop`, so no double drop
+        unsafe { ManuallyDrop::take(&mut manually_drop_self.closure) }
     }
 
     /// Emplaces this sized `T` onto the stack.
@@ -569,7 +569,7 @@ where
 
             let slice_emplacer_closure = move |slice_emplacer: &mut Emplacer<[T]>| {
                 // Move ite into closure
-                let emplacables_iter = iter;
+                let emplacables_iter = ManuallyDrop::new(iter);
 
                 // SAFETY: we fulfill the preconditions
                 let slice_emplacer_fn = unsafe { slice_emplacer.into_inner() };
@@ -579,8 +579,8 @@ where
                         let elem_emplacables: I =
                             // SAFETY: this "inner closure" can only be called once,
                             // per preconditions of `Emplacer::new`.
-                            // we `mem::forget` `elem_emplacables` below to avoid double-drop.
-                            unsafe { ptr::read(&emplacables_iter) };
+                            // `elem_emplacables` is inside a `ManuallyDrop`, so avoid double-drop.
+                            unsafe { ptr::read(&*emplacables_iter) };
 
                         // We can't trust `ExactSizeIterator`'s `len()`,
                         // so we keep track of how many
@@ -612,17 +612,14 @@ where
                         let emplacables_iter: I =
                             // SAFETY: this "inner closure" can only be called once,
                             // per preconditions of `Emplacer::new`.
-                            // we `mem::forget` `elem_emplacables` below to avoid double-drop.
-                            unsafe { ptr::read(&emplacables_iter) };
+                            // `elem_emplacables` is inside a `ManuallyDrop`, so avoid double-drop.
+                            unsafe { ptr::read(&*emplacables_iter) };
 
                         for _emplacable in emplacables_iter {
                             // drop `emplacable`
                         }
                     }
                 });
-
-                // avoid double-drop
-                mem::forget(emplacables_iter);
             };
 
             // SAFETY: `closure` properly emplaces `val`
@@ -679,26 +676,28 @@ impl<T> IntoEmplacable<T> for T {
     type Closure = impl EmplacableFn<Self>;
 
     #[inline]
-    fn into_emplacable(mut self) -> Emplacable<T, Self::Closure> {
+    fn into_emplacable(self) -> Emplacable<T, Self::Closure> {
         let closure = move |emplacer: &mut Emplacer<T>| {
+            let mut manually_drop_self = ManuallyDrop::new(self);
             // Safety: we call the closure right after
             let emplacer_closure = unsafe { emplacer.into_inner() };
             emplacer_closure(Layout::new::<T>(), (), &mut |out_ptr| {
                 if !out_ptr.is_null() {
                     // SAFETY: copying value where it belongs.
-                    // We `forget` right after to prevent double-free.
+                    // We use `ManuallyDrop` prevent double-free.
                     // `Emplacer` preconditions say this can only be run once.
                     unsafe {
-                        ptr::copy_nonoverlapping(addr_of!(self).cast::<T>(), out_ptr.cast(), 1);
+                        ptr::copy_nonoverlapping(
+                            addr_of!(*manually_drop_self).cast::<T>(),
+                            out_ptr.cast(),
+                            1,
+                        );
                     }
                 } else {
-                    // SAFETY: we `mem::forget` later to avoid double drop
-                    unsafe { ptr::drop_in_place(&mut self) }
+                    // SAFETY: we use `ManuallyDrop` to avoid double drop
+                    unsafe { ManuallyDrop::drop(&mut manually_drop_self) }
                 }
             });
-
-            // Don't want to double-drop
-            mem::forget(self);
         };
 
         // SAFETY: `closure` properly emplaces `val`
@@ -1120,7 +1119,7 @@ impl<T, const N: usize, C: EmplacableFn<T>> IntoEmplacable<[T; N]> for [Emplacab
     #[inline]
     fn into_emplacable(self) -> Emplacable<[T; N], Self::Closure> {
         let arr_emplacer_closure = move |arr_emplacer: &mut Emplacer<[T; N]>| {
-            let mut elem_emplacables = self;
+            let mut elem_emplacables = ManuallyDrop::new(self);
             // SAFETY: we fulfill the preconditions
             let arr_emplacer_fn = unsafe { arr_emplacer.into_inner() };
 
@@ -1133,7 +1132,7 @@ impl<T, const N: usize, C: EmplacableFn<T>> IntoEmplacable<[T; N]> for [Emplacab
                             // SAFETY: this "inner closure" can only be called once,
                             // per preconditions of `Emplacer::new`.
                             // we `mem::forget` `elem_emplacables` below to avoid double-drop.
-                            unsafe { ptr::read(&elem_emplacables) };
+                            unsafe { ptr::read(&*elem_emplacables) };
 
                         let n_zeros: [usize; N] = [0; N];
                         let mut i: usize = 0;
@@ -1164,16 +1163,13 @@ impl<T, const N: usize, C: EmplacableFn<T>> IntoEmplacable<[T; N]> for [Emplacab
                         // which drops the `T`s as well
                         // SAFETY: this "inner closure" can only be called once,
                         // per preconditions of `Emplacer::new`.
-                        // we `mem::forget` `elem_emplacables` below to avoid double-drop.
+                        // we never access `elem_emplacables` after this.
                         unsafe {
-                            ptr::drop_in_place(addr_of_mut!(elem_emplacables));
+                            ManuallyDrop::drop(&mut elem_emplacables);
                         }
                     }
                 },
             );
-
-            // avoid double-drop
-            mem::forget(elem_emplacables);
         };
 
         // SAFETY: `closure` properly emplaces `val`
