@@ -1,6 +1,6 @@
 //! Machinery to support functions that return unsized values.
 //!
-//! Written to support the `unsized_vec` crate, but is independent of it.
+//! Written to support the [`unsized-vec`] crate, but is independent of it.
 //! Requires nightly Rust.
 //!
 //! Unsized values can take many forms:
@@ -60,6 +60,7 @@
 //! but no fun things that use the tools. If you want more usage examples,
 //! check out `unsized-vec`'s documentation and the `examples` folder on GitHub.
 //!
+//! [`unsized-vec`]: https://docs.rs/unsized-vec/
 //! [`Unsize`]: core::marker::Unsize
 //! [`CoerceUnsized`]: core::ops::CoerceUnsized
 
@@ -394,7 +395,7 @@ where
 ///
 /// ## How it works
 ///
-// To make an [`Emplacable<T, _>`], you must first produce an [`EmplacableFn<T>`],
+/// To make an [`Emplacable<T, _>`], you must first produce an [`EmplacableFn<T>`],
 /// which is an [`FnOnce`] that accepts an [`Emplacer<T>`]. Your [`EmplacableFn<T>`] perform the follwoing steps:
 ///
 /// 1. Call [`into_fn`][`Emplacer::into_fn`] on the [`Emplacer<T>`] to obtain a [`EmplacerFn<T>`], which is an alias for
@@ -1244,9 +1245,9 @@ pub type EmplacerFn<'a, T> = dyn for<'b> FnMut(Layout, <T as Pointee>::Metadata,
 /// You won't need to interact with this type directly unless you are writing a function
 /// that directly produces or consumes `Emplacable`s.
 ///
-/// An `Emplacer closure generally does one of three things:
+/// An `Emplacer` closure generally does one of three things:
 ///
-/// 1. Allocate memory with the layout of its first argument, run the closure it recieves
+/// 1. Allocate memory with the layout of its first argument, run the closure it receives
 ///    as its third argument with a pointer to the start of the allocation, then constructs a pointer
 ///    of type `T` to that allocation with the given metadata.
 /// 2. Run the closure it recieves with a null pointer to signal that the value of type `T` should be dropped in place.
