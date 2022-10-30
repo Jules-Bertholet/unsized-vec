@@ -14,7 +14,7 @@ checksum = "d193d69bae983fc11a79df82342761dfbf28a99fc8d203dca4c3c1b590948965"
 
 [[package]]
 name = "unsized-vec"
-version = "0.0.2-alpha.2"
+version = "0.0.2-alpha.3"
 dependencies = [
  "emplacable",
  "serde",
