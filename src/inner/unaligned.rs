@@ -657,7 +657,7 @@ impl<T: ?Sized> UnsizedVecProvider<T> for UnalignedVecInner<T> {
 
         debug_assert!(index <= self.len());
 
-        let emplacable_closure = value.into_closure();
+        let emplacable_closure = value.into_fn();
 
         let emplacer_closure =
             &mut |layout, metadata, inner_closure: &mut dyn FnMut(*mut PhantomData<T>)| {
@@ -729,7 +729,7 @@ impl<T: ?Sized> UnsizedVecProvider<T> for UnalignedVecInner<T> {
             };
 
         // SAFETY: `emplacer_closure` runs the closure with a valid pointer to `index`
-        let emplacer = unsafe { Emplacer::new(emplacer_closure) };
+        let emplacer = unsafe { Emplacer::from_fn(emplacer_closure) };
 
         emplacable_closure(emplacer);
     }
@@ -776,7 +776,7 @@ impl<T: ?Sized> UnsizedVecProvider<T> for UnalignedVecInner<T> {
         // Copy element into the place
 
         // SAFETY: we call the closure right after we unwrap it
-        let emplacer_closure = unsafe { emplacer.into_inner() };
+        let emplacer_closure = unsafe { emplacer.into_fn() };
 
         emplacer_closure(
             // SAFETY: `size_of_val` comes from the vec
@@ -862,7 +862,7 @@ impl<T: ?Sized> UnsizedVecProvider<T> for UnalignedVecInner<T> {
     }
 
     fn push_with(&mut self, value: Emplacable<T, impl EmplacableFn<T>>) {
-        let emplacable_closure = value.into_closure();
+        let emplacable_closure = value.into_fn();
 
         let emplacer_closure =
             &mut |layout: Layout, metadata, inner_closure: &mut dyn FnMut(*mut PhantomData<T>)| {
@@ -892,7 +892,7 @@ impl<T: ?Sized> UnsizedVecProvider<T> for UnalignedVecInner<T> {
             };
 
         // SAFETY: `emplacer_closure` runs the closure with a valid pointer to the end of the vec
-        let emplacer = unsafe { Emplacer::new(emplacer_closure) };
+        let emplacer = unsafe { Emplacer::from_fn(emplacer_closure) };
 
         emplacable_closure(emplacer);
     }
@@ -934,7 +934,7 @@ impl<T: ?Sized> UnsizedVecProvider<T> for UnalignedVecInner<T> {
         // Copy element into the place
 
         // SAFETY: we call the closure right after we unwrap it
-        let emplace_closure = unsafe { emplacer.into_inner() };
+        let emplace_closure = unsafe { emplacer.into_fn() };
 
         emplace_closure(
             // SAFETY: `size_of_val` comes from the vec

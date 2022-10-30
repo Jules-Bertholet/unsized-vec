@@ -898,7 +898,7 @@ impl<T: ?Sized> UnsizedVec<T> {
                 unsafe { self.inner.remove_into_unchecked(index, emplacer) };
             };
             // SAFETY: `remove_into_unchecked` upholds the requirements
-            unsafe { Emplacable::from_closure(closure) }
+            unsafe { Emplacable::from_fn(closure) }
         } else {
             assert_failed(index, self.len())
         }
@@ -1044,7 +1044,7 @@ impl<T: ?Sized> UnsizedVec<T> {
             };
 
             // SAFETY: `pop_into_unchecked` upholds the requirements of this closure
-            Some(unsafe { Emplacable::from_closure(closure) })
+            Some(unsafe { Emplacable::from_fn(closure) })
         } else {
             None
         }
@@ -1378,15 +1378,15 @@ where
     }
 }
 
-impl<T, C> FromIterator<Emplacable<T, C>> for UnsizedVec<T>
+impl<T, F> FromIterator<Emplacable<T, F>> for UnsizedVec<T>
 where
     T: ?Sized,
-    C: EmplacableFn<T>,
+    F: EmplacableFn<T>,
 {
     #[inline]
     fn from_iter<I>(iter: I) -> Self
     where
-        I: IntoIterator<Item = Emplacable<T, C>>,
+        I: IntoIterator<Item = Emplacable<T, F>>,
     {
         let mut vec = UnsizedVec::new();
         vec.extend(iter);
@@ -1394,17 +1394,17 @@ where
     }
 }
 
-impl<T, C> Extend<Emplacable<T, C>> for UnsizedVec<T>
+impl<T, F> Extend<Emplacable<T, F>> for UnsizedVec<T>
 where
     T: ?Sized,
-    C: EmplacableFn<T>,
+    F: EmplacableFn<T>,
 {
     #[inline]
     fn extend<I>(&mut self, iter: I)
     where
-        I: IntoIterator<Item = Emplacable<T, C>>,
+        I: IntoIterator<Item = Emplacable<T, F>>,
     {
-        fn extend_inner<T: ?Sized, C: EmplacableFn<T>, I: Iterator<Item = Emplacable<T, C>>>(
+        fn extend_inner<T: ?Sized, F: EmplacableFn<T>, I: Iterator<Item = Emplacable<T, F>>>(
             vec: &mut UnsizedVec<T>,
             iter: I,
         ) {
@@ -1536,7 +1536,7 @@ impl<T: ?Sized> PushToUnsizedVec<T> for T {
     }
 }
 
-impl<T: ?Sized, C: EmplacableFn<T>> PushToUnsizedVec<T> for Emplacable<T, C> {
+impl<T: ?Sized, F: EmplacableFn<T>> PushToUnsizedVec<T> for Emplacable<T, F> {
     #[inline]
     fn push_to_unsized_vec(self, vec: &mut UnsizedVec<T>) {
         vec.push_with(self);

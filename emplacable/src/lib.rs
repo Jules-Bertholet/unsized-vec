@@ -391,20 +391,43 @@ where
 /// allocation. You can get a `T` out of an `Emplacable` through functions like
 /// [`box_new_with`]. Alternately, you can drop the value of type `T` by dropping
 /// the `Emplacable`. Or you can forget the value of type `T` with [`Emplacable::forget`].
+///
+/// ## How it works
+///
+// To make an [`Emplacable<T, _>`], you must first produce an [`EmplacableFn<T>`],
+/// which is an [`FnOnce`] that accepts an [`Emplacer<T>`]. Your [`EmplacableFn<T>`] perform the follwoing steps:
+///
+/// 1. Call [`into_fn`][`Emplacer::into_fn`] on the [`Emplacer<T>`] to obtain a [`EmplacerFn<T>`], which is an alias for
+/// `dyn FnMut(Layout, <T as Pointee>::Metadata, &mut (dyn FnMut(*mut PhantomData<T>)))`.
+/// 2. Call the [`EmplacerFn<T>`] with the following arguments:
+///
+///     1. `Layout`: The layout of the value of type `T` you want to emplace
+///     2. `<T as Pointee>::Metadata`: The pointer metadata of the value of type `T` you want to emplace
+///     3. `&mut (dyn FnMut(*mut PhantomData<T>)))`: The closure you must pass for this thrid argument
+///         must do one of two things, depending on the `*mut PhantomData<T>` pointer it recieves.
+///         - if the pointer is null, it should drop the value of type `T`.
+///         - otherwise, it should write the value of type `T` to the pointer,
+///           which it can assume points to the start of an allocation with the size and alignment of
+///           the `Layout` from above.
+///
+/// Once you have an [`EmplacableFn<T>`], use [`Emplacable::from_fn`] to turn it into an [`Emplacable<T, _>`].
+///
+/// There are **safety preconditions** at every step of this process that **must be respected to avoid UB.**
+/// Read the documentation of all the methods involved to learn about them.
 #[repr(transparent)]
-pub struct Emplacable<T, C>
+pub struct Emplacable<T, F>
 where
     T: ?Sized,
-    C: EmplacableFn<T>,
+    F: EmplacableFn<T>,
 {
-    closure: ManuallyDrop<C>,
+    closure: ManuallyDrop<F>,
     phantom: PhantomData<fn(&mut Emplacer<T>)>,
 }
 
-impl<T, C> Emplacable<T, C>
+impl<T, F> Emplacable<T, F>
 where
     T: ?Sized,
-    C: EmplacableFn<T>,
+    F: EmplacableFn<T>,
 {
     /// Create a new `Emplacable` from a closure.
     /// This is only useful if you are implementing
@@ -419,7 +442,7 @@ where
     /// initalize the value.
     #[must_use]
     #[inline]
-    pub unsafe fn from_closure(closure: C) -> Self {
+    pub unsafe fn from_fn(closure: F) -> Self {
         Emplacable {
             closure: ManuallyDrop::new(closure),
             phantom: PhantomData,
@@ -432,7 +455,7 @@ where
     /// a function like [`box_new_with`].
     #[must_use]
     #[inline]
-    pub fn into_closure(self) -> C {
+    pub fn into_fn(self) -> F {
         let mut manually_drop_self = ManuallyDrop::new(self);
 
         // SAFETY: `self` is in a `ManuallyDrop`, so no double drop
@@ -454,9 +477,9 @@ where
             };
 
         // SAFETY: emplacer passes in pointer to `MaybeUninit` buffer, which is of the right size/align
-        let emplacer = unsafe { Emplacer::new(emplacer_closure) };
+        let emplacer = unsafe { Emplacer::from_fn(emplacer_closure) };
 
-        let closure = self.into_closure();
+        let closure = self.into_fn();
         closure(emplacer);
 
         // SAFETY: `buf` was initialized by the emplacer
@@ -481,12 +504,12 @@ where
             // Do nothing. Just forget the value ever existed.
         }
 
-        let emplacable_closure = self.into_closure();
+        let emplacable_closure = self.into_fn();
 
         let ref_to_fn = &mut forgetting_emplacer_closure::<T>;
 
         // SAFETY: `forgetting_emplacer` fulfills the requirements
-        let forgetting_emplacer = unsafe { Emplacer::new(ref_to_fn) };
+        let forgetting_emplacer = unsafe { Emplacer::from_fn(ref_to_fn) };
 
         emplacable_closure(forgetting_emplacer);
     }
@@ -507,11 +530,11 @@ where
             ptr::metadata(null_ptr_to_u)
         }
 
-        let sized_emplacable_closure = self.into_closure();
+        let sized_emplacable_closure = self.into_fn();
 
         let unsized_emplacable_closure = move |unsized_emplacer: &mut Emplacer<U>| {
             // SAFETY: We are just wrapping this emplacer
-            let unsized_emplacer_closure = unsafe { unsized_emplacer.into_inner() };
+            let unsized_emplacer_closure = unsafe { unsized_emplacer.into_fn() };
 
             let mut sized_emplacer_closure =
                 |_: Layout, _: (), sized_inner_closure: &mut dyn FnMut(*mut PhantomData<T>)| {
@@ -528,13 +551,13 @@ where
                 };
 
             // SAFETY: just wrapping the emplacer we got, fulfills the preconditions if the inner one does
-            let sized_emplacer = unsafe { Emplacer::new(&mut sized_emplacer_closure) };
+            let sized_emplacer = unsafe { Emplacer::from_fn(&mut sized_emplacer_closure) };
 
             sized_emplacable_closure(sized_emplacer);
         };
 
         // SAFETY: Again, just wrapping our input
-        unsafe { Emplacable::from_closure(unsized_emplacable_closure) }
+        unsafe { Emplacable::from_fn(unsized_emplacable_closure) }
     }
 
     /// Creates an `Emplacable` for a slice of values of type `T` out of an iterator
@@ -553,8 +576,8 @@ where
     {
         fn from_iter_inner<
             T,
-            C: EmplacableFn<T>,
-            I: Iterator<Item = Emplacable<T, C>> + ExactSizeIterator,
+            F: EmplacableFn<T>,
+            I: Iterator<Item = Emplacable<T, F>> + ExactSizeIterator,
         >(
             iter: I,
         ) -> Emplacable<[T], impl EmplacableFn<[T]>> {
@@ -572,7 +595,7 @@ where
                 let emplacables_iter = ManuallyDrop::new(iter);
 
                 // SAFETY: we fulfill the preconditions
-                let slice_emplacer_fn = unsafe { slice_emplacer.into_inner() };
+                let slice_emplacer_fn = unsafe { slice_emplacer.into_fn() };
 
                 slice_emplacer_fn(layout, len, &mut |arr_out_ptr: *mut PhantomData<[T]>| {
                     if !arr_out_ptr.is_null() {
@@ -589,7 +612,7 @@ where
 
                         let indexed_elem_emplacables = (0..len).zip(elem_emplacables);
                         indexed_elem_emplacables.for_each(|(index, elem_emplacable)| {
-                            let elem_emplacable_closure = elem_emplacable.into_closure();
+                            let elem_emplacable_closure = elem_emplacable.into_fn();
                             let elem_emplacer_closure = &mut move |
                                     _: Layout,
                                     (),
@@ -601,7 +624,7 @@ where
 
                             // SAFETY: `elem_emplacer_closure` passes a pointer with the correct offset from the
                             // start of the allocation
-                            let elem_emplacer = unsafe { Emplacer::new(elem_emplacer_closure) };
+                            let elem_emplacer = unsafe { Emplacer::from_fn(elem_emplacer_closure) };
                             elem_emplacable_closure(elem_emplacer);
 
                             num_elems_copied += 1;
@@ -623,7 +646,7 @@ where
             };
 
             // SAFETY: `closure` properly emplaces `val`
-            unsafe { Emplacable::from_closure(slice_emplacer_closure) }
+            unsafe { Emplacable::from_fn(slice_emplacer_closure) }
         }
 
         let emplacables_iter = iter.into_iter();
@@ -632,10 +655,10 @@ where
     }
 }
 
-impl<T, C> Drop for Emplacable<T, C>
+impl<T, F> Drop for Emplacable<T, F>
 where
     T: ?Sized,
-    C: EmplacableFn<T>,
+    F: EmplacableFn<T>,
 {
     /// Runs the contained closure to completion,
     /// instructing it to drop the value of type `T`.
@@ -653,7 +676,7 @@ where
         let ref_to_fn = &mut dropping_emplacer_closure::<T>;
 
         // SAFETY: `dropping_emplacer_closure` fulfills the requirements
-        let dropping_emplacer = unsafe { Emplacer::new(ref_to_fn) };
+        let dropping_emplacer = unsafe { Emplacer::from_fn(ref_to_fn) };
 
         // SAFETY: we are inside `drop`, so no one else will access this
         // `ManuallyDrop` after us
@@ -663,7 +686,7 @@ where
     }
 }
 
-/// Implementation detail for the `From` impls
+/// Implementation detail for the `From` impls.
 #[doc(hidden)]
 pub trait IntoEmplacable<T: ?Sized> {
     type Closure: EmplacableFn<T>;
@@ -680,7 +703,7 @@ impl<T> IntoEmplacable<T> for T {
         let closure = move |emplacer: &mut Emplacer<T>| {
             let mut manually_drop_self = ManuallyDrop::new(self);
             // Safety: we call the closure right after
-            let emplacer_closure = unsafe { emplacer.into_inner() };
+            let emplacer_closure = unsafe { emplacer.into_fn() };
             emplacer_closure(Layout::new::<T>(), (), &mut |out_ptr| {
                 if !out_ptr.is_null() {
                     // SAFETY: copying value where it belongs.
@@ -701,7 +724,7 @@ impl<T> IntoEmplacable<T> for T {
         };
 
         // SAFETY: `closure` properly emplaces `val`
-        unsafe { Emplacable::from_closure(closure) }
+        unsafe { Emplacable::from_fn(closure) }
     }
 }
 
@@ -755,7 +778,7 @@ impl<'s, T: Clone + 's> IntoEmplacable<[T]> for &'s [T] {
 
         let closure = move |emplacer: &mut Emplacer<[T]>| {
             // Safety: we call the closure right after
-            let emplacer_closure = unsafe { emplacer.into_inner() };
+            let emplacer_closure = unsafe { emplacer.into_fn() };
             emplacer_closure(layout, metadata, &mut |out_ptr| {
                 if !out_ptr.is_null() {
                     // SAFETY: by precondtion of `Emplacer::new`
@@ -765,7 +788,7 @@ impl<'s, T: Clone + 's> IntoEmplacable<[T]> for &'s [T] {
         };
 
         // SAFETY: `closure` properly emplaces `val`
-        unsafe { Emplacable::from_closure(closure) }
+        unsafe { Emplacable::from_fn(closure) }
     }
 }
 
@@ -788,7 +811,7 @@ impl<'s> IntoEmplacable<str> for &'s str {
 
         let closure = move |emplacer: &mut Emplacer<str>| {
             // Safety: we call the closure right after
-            let emplacer_closure = unsafe { emplacer.into_inner() };
+            let emplacer_closure = unsafe { emplacer.into_fn() };
             emplacer_closure(layout, metadata, &mut |out_ptr| {
                 if !out_ptr.is_null() {
                     // SAFETY: copying value where it belongs.
@@ -804,7 +827,7 @@ impl<'s> IntoEmplacable<str> for &'s str {
         };
 
         // SAFETY: `closure` properly emplaces `val`
-        unsafe { Emplacable::from_closure(closure) }
+        unsafe { Emplacable::from_fn(closure) }
     }
 }
 
@@ -825,7 +848,7 @@ impl<'s> IntoEmplacable<CStr> for &'s CStr {
 
         let closure = move |emplacer: &mut Emplacer<CStr>| {
             // Safety: we call the closure right after
-            let emplacer_closure = unsafe { emplacer.into_inner() };
+            let emplacer_closure = unsafe { emplacer.into_fn() };
             let size_of_val = layout.size();
             emplacer_closure(layout, metadata, &mut |out_ptr| {
                 if !out_ptr.is_null() {
@@ -842,7 +865,7 @@ impl<'s> IntoEmplacable<CStr> for &'s CStr {
         };
 
         // SAFETY: `closure` properly emplaces `val`
-        unsafe { Emplacable::from_closure(closure) }
+        unsafe { Emplacable::from_fn(closure) }
     }
 }
 
@@ -865,7 +888,7 @@ impl<'s> IntoEmplacable<OsStr> for &'s OsStr {
 
         let closure = move |emplacer: &mut Emplacer<OsStr>| {
             // Safety: we call the closure right after
-            let emplacer_closure = unsafe { emplacer.into_inner() };
+            let emplacer_closure = unsafe { emplacer.into_fn() };
             let size_of_val = layout.size();
             emplacer_closure(layout, metadata, &mut |out_ptr| {
                 if !out_ptr.is_null() {
@@ -884,7 +907,7 @@ impl<'s> IntoEmplacable<OsStr> for &'s OsStr {
         };
 
         // SAFETY: `closure` properly emplaces `val`
-        unsafe { Emplacable::from_closure(closure) }
+        unsafe { Emplacable::from_fn(closure) }
     }
 }
 
@@ -908,7 +931,7 @@ impl<'s> IntoEmplacable<Path> for &'s Path {
 
         let closure = move |emplacer: &mut Emplacer<Path>| {
             // Safety: we call the closure right after
-            let emplacer_closure = unsafe { emplacer.into_inner() };
+            let emplacer_closure = unsafe { emplacer.into_fn() };
             let size_of_val = layout.size();
             emplacer_closure(layout, metadata, &mut |out_ptr| {
                 if !out_ptr.is_null() {
@@ -927,7 +950,7 @@ impl<'s> IntoEmplacable<Path> for &'s Path {
         };
 
         // SAFETY: `closure` properly emplaces `val`
-        unsafe { Emplacable::from_closure(closure) }
+        unsafe { Emplacable::from_fn(closure) }
     }
 }
 
@@ -942,25 +965,25 @@ impl<'s> From<&'s Path> for Emplacable<Path, <&'s Path as IntoEmplacable<Path>>:
 /// Implementation detail of `From<Emplacable<str, _>> for Emplacable<u8, _>`.
 #[doc(hidden)]
 pub trait FromEmplacable<T: ?Sized> {
-    type OutputClosure<C: EmplacableFn<T>>: EmplacableFn<Self>;
+    type OutputClosure<F: EmplacableFn<T>>: EmplacableFn<Self>;
 
-    fn from_emplacable<C: EmplacableFn<T>>(
-        emplacable: Emplacable<T, C>,
-    ) -> Emplacable<Self, Self::OutputClosure<C>>;
+    fn from_emplacable<F: EmplacableFn<T>>(
+        emplacable: Emplacable<T, F>,
+    ) -> Emplacable<Self, Self::OutputClosure<F>>;
 }
 
-impl<C: EmplacableFn<str>> IntoEmplacable<[u8]> for Emplacable<str, C> {
+impl<F: EmplacableFn<str>> IntoEmplacable<[u8]> for Emplacable<str, F> {
     type Closure = impl EmplacableFn<[u8]>;
 
     #[inline]
     fn into_emplacable(self) -> Emplacable<[u8], Self::Closure> {
-        let str_closure = self.into_closure();
+        let str_closure = self.into_fn();
 
         #[allow(clippy::unused_unit)] // https://github.com/rust-lang/rust-clippy/issues/9748
         let u8_emplacer_closure = for<'a, 'b> move |u8_emplacer: &'a mut Emplacer<'b, [u8]>| -> () {
             let u8_emplacer_fn: &mut EmplacerFn<[u8]> =
                 // SAFETY: just wrapping this in another emplacer
-                unsafe { u8_emplacer.into_inner() };
+                unsafe { u8_emplacer.into_fn() };
 
             let mut str_emplacer_fn =
                 |layout: Layout,
@@ -972,25 +995,26 @@ impl<C: EmplacableFn<str>> IntoEmplacable<[u8]> for Emplacable<str, C> {
                     u8_emplacer_fn(layout, metadata, u8_inner_closure);
                 };
 
-            // SAFETY: Emplacer just calle inner emplacer
-            let str_emplacer: &mut Emplacer<str> = unsafe { Emplacer::new(&mut str_emplacer_fn) };
+            let str_emplacer: &mut Emplacer<str> =
+                // SAFETY: Emplacer just calle inner emplacer
+                unsafe { Emplacer::from_fn(&mut str_emplacer_fn) };
 
             str_closure(str_emplacer);
         };
 
         // SAFETY: `closure` properly emplaces `val`
-        unsafe { Emplacable::from_closure(u8_emplacer_closure) }
+        unsafe { Emplacable::from_fn(u8_emplacer_closure) }
     }
 }
 
-impl<C> From<Emplacable<str, C>>
-    for Emplacable<[u8], <Emplacable<str, C> as IntoEmplacable<[u8]>>::Closure>
+impl<F> From<Emplacable<str, F>>
+    for Emplacable<[u8], <Emplacable<str, F> as IntoEmplacable<[u8]>>::Closure>
 where
-    C: EmplacableFn<str>,
+    F: EmplacableFn<str>,
 {
     #[inline]
-    fn from(emplacable: Emplacable<str, C>) -> Self {
-        <Emplacable<str, C> as IntoEmplacable<[u8]>>::into_emplacable(emplacable)
+    fn from(emplacable: Emplacable<str, F>) -> Self {
+        <Emplacable<str, F> as IntoEmplacable<[u8]>>::into_emplacable(emplacable)
     }
 }
 
@@ -1005,7 +1029,7 @@ impl<T: ?Sized> IntoEmplacable<T> for Box<T> {
             let metadata = ptr::metadata(ptr);
 
             // SAFETY: we fulfill the preconditions
-            let emplacer_closure = unsafe { emplacer.into_inner() };
+            let emplacer_closure = unsafe { emplacer.into_fn() };
             emplacer_closure(layout, metadata, &mut |out_ptr| {
                 if !out_ptr.is_null() {
                     // SAFETY: checked for null, copying correct number of bytes.
@@ -1027,7 +1051,7 @@ impl<T: ?Sized> IntoEmplacable<T> for Box<T> {
         };
 
         // SAFETY: `closure` properly emplaces `val`
-        unsafe { Emplacable::from_closure(closure) }
+        unsafe { Emplacable::from_fn(closure) }
     }
 }
 
@@ -1057,7 +1081,7 @@ impl<T> IntoEmplacable<[T]> for Vec<T> {
             };
 
             // SAFETY: we fulfill the preconditions
-            let emplacer_closure = unsafe { emplacer.into_inner() };
+            let emplacer_closure = unsafe { emplacer.into_fn() };
             emplacer_closure(layout, len, &mut |out_ptr| {
                 if !out_ptr.is_null() {
                     // SAFETY: checked for null, copying correct number of bytes.
@@ -1081,7 +1105,7 @@ impl<T> IntoEmplacable<[T]> for Vec<T> {
         };
 
         // SAFETY: `closure` properly emplaces `val`
-        unsafe { Emplacable::from_closure(closure) }
+        unsafe { Emplacable::from_fn(closure) }
     }
 }
 
@@ -1093,7 +1117,7 @@ impl<T> From<Vec<T>> for Emplacable<[T], <Vec<T> as IntoEmplacable<[T]>>::Closur
     }
 }
 
-impl<T, const N: usize, C: EmplacableFn<[T; N]>> IntoEmplacable<[T]> for Emplacable<[T; N], C> {
+impl<T, const N: usize, F: EmplacableFn<[T; N]>> IntoEmplacable<[T]> for Emplacable<[T; N], F> {
     type Closure = impl EmplacableFn<[T]>;
 
     #[inline]
@@ -1102,18 +1126,18 @@ impl<T, const N: usize, C: EmplacableFn<[T; N]>> IntoEmplacable<[T]> for Emplaca
     }
 }
 
-impl<T, const N: usize, C> From<Emplacable<[T; N], C>>
-    for Emplacable<[T], <Emplacable<[T; N], C> as IntoEmplacable<[T]>>::Closure>
+impl<T, const N: usize, F> From<Emplacable<[T; N], F>>
+    for Emplacable<[T], <Emplacable<[T; N], F> as IntoEmplacable<[T]>>::Closure>
 where
-    C: EmplacableFn<[T; N]>,
+    F: EmplacableFn<[T; N]>,
 {
     #[inline]
-    fn from(value: Emplacable<[T; N], C>) -> Self {
-        <Emplacable<[T; N], C> as IntoEmplacable<[T]>>::into_emplacable(value)
+    fn from(value: Emplacable<[T; N], F>) -> Self {
+        <Emplacable<[T; N], F> as IntoEmplacable<[T]>>::into_emplacable(value)
     }
 }
 
-impl<T, const N: usize, C: EmplacableFn<T>> IntoEmplacable<[T; N]> for [Emplacable<T, C>; N] {
+impl<T, const N: usize, F: EmplacableFn<T>> IntoEmplacable<[T; N]> for [Emplacable<T, F>; N] {
     type Closure = impl EmplacableFn<[T; N]>;
 
     #[inline]
@@ -1121,14 +1145,14 @@ impl<T, const N: usize, C: EmplacableFn<T>> IntoEmplacable<[T; N]> for [Emplacab
         let arr_emplacer_closure = move |arr_emplacer: &mut Emplacer<[T; N]>| {
             let mut elem_emplacables = ManuallyDrop::new(self);
             // SAFETY: we fulfill the preconditions
-            let arr_emplacer_fn = unsafe { arr_emplacer.into_inner() };
+            let arr_emplacer_fn = unsafe { arr_emplacer.into_fn() };
 
             arr_emplacer_fn(
                 Layout::new::<[T; N]>(),
                 (),
                 &mut |arr_out_ptr: *mut PhantomData<[T; N]>| {
                     if !arr_out_ptr.is_null() {
-                        let elem_emplacables: [Emplacable<T, C>; N] =
+                        let elem_emplacables: [Emplacable<T, F>; N] =
                             // SAFETY: this "inner closure" can only be called once,
                             // per preconditions of `Emplacer::new`.
                             // we `mem::forget` `elem_emplacables` below to avoid double-drop.
@@ -1143,7 +1167,7 @@ impl<T, const N: usize, C: EmplacableFn<T>> IntoEmplacable<[T; N]> for [Emplacab
 
                         let indexed_elem_emplacables = indexes.zip(elem_emplacables);
                         indexed_elem_emplacables.map(|(index, elem_emplacable)| {
-                            let elem_emplacable_closure = elem_emplacable.into_closure();
+                            let elem_emplacable_closure = elem_emplacable.into_fn();
                             let elem_emplacer_closure = &mut move |
                                 _: Layout,
                                 (),
@@ -1155,7 +1179,7 @@ impl<T, const N: usize, C: EmplacableFn<T>> IntoEmplacable<[T; N]> for [Emplacab
 
                             // SAFETY: `elem_emplacer_closure` passes a pointer with the correct offset from the
                             // start of the allocation
-                            let elem_emplacer = unsafe { Emplacer::new(elem_emplacer_closure) };
+                            let elem_emplacer = unsafe { Emplacer::from_fn(elem_emplacer_closure) };
                             elem_emplacable_closure(elem_emplacer);
                         });
                     } else {
@@ -1173,38 +1197,38 @@ impl<T, const N: usize, C: EmplacableFn<T>> IntoEmplacable<[T; N]> for [Emplacab
         };
 
         // SAFETY: `closure` properly emplaces `val`
-        unsafe { Emplacable::from_closure(arr_emplacer_closure) }
+        unsafe { Emplacable::from_fn(arr_emplacer_closure) }
     }
 }
 
-impl<T, const N: usize, C> From<[Emplacable<T, C>; N]>
-    for Emplacable<[T; N], <[Emplacable<T, C>; N] as IntoEmplacable<[T; N]>>::Closure>
+impl<T, const N: usize, F> From<[Emplacable<T, F>; N]>
+    for Emplacable<[T; N], <[Emplacable<T, F>; N] as IntoEmplacable<[T; N]>>::Closure>
 where
-    C: EmplacableFn<T>,
+    F: EmplacableFn<T>,
 {
     #[inline]
-    fn from(value: [Emplacable<T, C>; N]) -> Self {
-        <[Emplacable<T, C>; N] as IntoEmplacable<[T; N]>>::into_emplacable(value)
+    fn from(value: [Emplacable<T, F>; N]) -> Self {
+        <[Emplacable<T, F>; N] as IntoEmplacable<[T; N]>>::into_emplacable(value)
     }
 }
 
-impl<T, const N: usize, C: EmplacableFn<T>> IntoEmplacable<[T]> for [Emplacable<T, C>; N] {
+impl<T, const N: usize, F: EmplacableFn<T>> IntoEmplacable<[T]> for [Emplacable<T, F>; N] {
     type Closure = impl EmplacableFn<[T]>;
 
     #[inline]
     fn into_emplacable(self) -> Emplacable<[T], Self::Closure> {
-        <[Emplacable<T, C>; N] as IntoEmplacable<[T; N]>>::into_emplacable(self).into()
+        <[Emplacable<T, F>; N] as IntoEmplacable<[T; N]>>::into_emplacable(self).into()
     }
 }
 
-impl<T, const N: usize, C> From<[Emplacable<T, C>; N]>
-    for Emplacable<[T], <[Emplacable<T, C>; N] as IntoEmplacable<[T]>>::Closure>
+impl<T, const N: usize, F> From<[Emplacable<T, F>; N]>
+    for Emplacable<[T], <[Emplacable<T, F>; N] as IntoEmplacable<[T]>>::Closure>
 where
-    C: EmplacableFn<T>,
+    F: EmplacableFn<T>,
 {
     #[inline]
-    fn from(value: [Emplacable<T, C>; N]) -> Self {
-        <[Emplacable<T, C>; N] as IntoEmplacable<[T]>>::into_emplacable(value)
+    fn from(value: [Emplacable<T, F>; N]) -> Self {
+        <[Emplacable<T, F>; N] as IntoEmplacable<[T]>>::into_emplacable(value)
     }
 }
 
@@ -1218,17 +1242,17 @@ pub type EmplacerFn<'a, T> = dyn for<'b> FnMut(Layout, <T as Pointee>::Metadata,
 /// Wraps a closure that tells the function where to write its return value.
 ///
 /// You won't need to interact with this type directly unless you are writing a function
-/// that directly produces or consumes [`Emplacable`]s.
+/// that directly produces or consumes `Emplacable`s.
 ///
-/// An [`Emplacer`] closure generally does one of three things:
+/// An `Emplacer closure generally does one of three things:
 ///
 /// 1. Allocate memory with the layout of its first argument, run the closure it recieves
 ///    as its third argument with a pointer to the start of the allocation, then constructs a pointer
 ///    of type `T` to that allocation with the given metadata.
-/// 2. Run the closure it recieves with a null pointer to signify that the value of type `T` should be dropped in place.
+/// 2. Run the closure it recieves with a null pointer to signal that the value of type `T` should be dropped in place.
 /// 3. Do nothing at all, signifying that the value of type `T` should be forgotten and its desctructor should not be run.
 ///
-/// [`Emplacer`]s are allowed to panic, unwind, abort, etc. However, they can't unwind after
+/// `Emplacer`s are allowed to panic, unwind, abort, etc. However, they can't unwind after
 /// they have run their inner closure.
 #[repr(transparent)]
 pub struct Emplacer<'a, T>(EmplacerFn<'a, T>)
@@ -1239,51 +1263,66 @@ impl<'a, T> Emplacer<'a, T>
 where
     T: ?Sized,
 {
-    /// Creates an `Emplacer` from a closure.
+    /// Creates an `Emplacer` from an [`EmplacerFn<T>`] closure
+    /// (a `dyn FnMut(Layout, <T as Pointee>::Metadata, &mut dyn FnMut(*mut PhantomData<T>))`).
     ///
-    ///  # Safety
+    /// `emplacer_fn` should do one the following things:
     ///
-    /// The closure `e`, if it runs the closure that it recieves as a third argument, must
-    /// pass in a pointer that has the alignment of the `Layout` passed to it, and is valid
-    /// for writes of the number of bytes corresponding to the `Layout`. (It can also
-    /// pass in a null pointer.)
-    ///
-    /// Also, `e` can run that closure at most once, and must do so before returning,
-    /// if it returns. It is allowed to unwind or otherwise diverge, but once it runs
-    /// the closure it is no longer allowed to unwind.
-    ///
-    /// The `Emplacer` can't assume that is has received full ownership of
-    /// the value written to the pointer of the inner closure, until the moment it returns.
-    /// Specifically, it is not allowed to drop the value if it unwinds.
-    #[must_use]
-    #[inline]
-    pub unsafe fn new<'b>(e: &'b mut EmplacerFn<'a, T>) -> &'b mut Self {
-        // SAFETY: `repr(transparent)` guarantees compatible layouts
-        unsafe { &mut *((e as *mut EmplacerFn<'a, T>) as *mut Self) }
-    }
-
-    /// Obtains the closure inside this `Emplacer`.
+    /// - Allocate a chunk of memory that satisfies the requirements of the [`Layout`]
+    ///   it receives as its fisrst argument, and pass a pointer to the start of that allocation
+    ///   to the closure it recieves as its third argument.
+    /// - Ignore its first and second arguments, and pass a null pointer to the closure
+    ///   as its first argument.
+    /// - Do nothing at all.
     ///
     /// # Safety
     ///
-    /// If you unwrap this `Emplacer` and call the resulting closure, you must ensure
-    /// that the closure you pas in writes a valid value of type `T` to the passed-in pointer
-    /// (or panics, or runs forever, or exits without returning in some other otherwise-sound way).
+    /// The `emplacer_fn`, if it runs the closure that it recieves as a third argument, must
+    /// pass in a pointer that is ether null, or has the alignment of the `Layout` passed to it,
+    /// and is valid for writes of the number of bytes corresponding to the `Layout`.
     ///
-    /// The value you write must also correspond to the layout and pointer metadata you pass in.
+    /// `emplacer_fn` is not permitted to run the closure it receives as its third argument more than once.
+    ///
+    /// If `emplacer_fn` runs the closure it receives as its thrid argument, it must do so before returning.
+    ///
+    /// `emplacer_fn` is allowed to unwind or otherwise diverge. But if it runs the closure it receives as its third argument,
+    /// then once it does so it is no longer allowed to unwind.s
+    ///
+    /// The `emplacer_fn` can't assume that is has received full ownership of
+    /// the value written to the pointer of the inner closure, until the moment `emplacer_fn`
+    /// (and the [`EmplacableFn<T>`] that calls it) returns. Specifically, `emplacer_fn` is not
+    /// allowed to drop the value.
+    #[must_use]
+    #[inline]
+    pub unsafe fn from_fn<'b>(emplacer_fn: &'b mut EmplacerFn<'a, T>) -> &'b mut Self {
+        // SAFETY: `repr(transparent)` guarantees compatible layouts
+        unsafe { &mut *((emplacer_fn as *mut EmplacerFn<'a, T>) as *mut Self) }
+    }
+
+    /// Obtains the closure inside this `Emplacer<T>`.
+    /// This should generally be called only inside [`EmplacableFn<T>`]s.
+    ///
+    /// # Safety
+    ///
+    /// If you call the resulting [`EmplacerFn`] closure, you must ensure
+    /// that the closure you pass in:
+    ///
+    /// - If it receives a non-null pointer as an argument, it *must* write a valid value of type `T`
+    ///   to the passed-in pointer. This value must correspond to the `Layout` and pointer metadata you
+    ///   passed to the [`EmplacerFn<T>`].
+    /// - If it recieves a null pointer as an argument, then it is recommmended that you drop the
+    ///   value of type `T` that you would have written out had the pointer been non-null.
+    ///   (you aren't *required* to do this.)
+    /// - In either case, the closure is alterately allowed to panic, unwind, abort, or diverge
+    ///   in some other way. If it does so, it is not obligated to perform the tasks listed above.
     ///
     /// If `T`'s size or alignment can be known at compile-time, or can be determined from the
     /// pointer metadata alone, and you pass in an oversized/overaligned `Layout`, then you are not guaranteed
-    /// to get an allocation that matches the over-size/over-align guarantees.
+    /// to get an allocation that matches the `Layout`'s stronger guarantees.
     ///
-    /// Alternatively, if the closure you pass in receives a null pointer
-    /// (which you *must* check for), then you should drop the value of type
-    /// `T` in place (though it's not unsound for you to simply forget it).
-    ///
-    ///
-    /// You may not call the closure more than once.
+    /// You may not call the [`EmplacerFn`] closure more than once.
     #[inline]
-    pub unsafe fn into_inner<'b>(&'b mut self) -> &'b mut EmplacerFn<'a, T> {
+    pub unsafe fn into_fn<'b>(&'b mut self) -> &'b mut EmplacerFn<'a, T> {
         // SAFETY: `repr(transparent)` guarantees compatible layouts
         &mut self.0
     }
@@ -1399,9 +1438,9 @@ where
         };
 
     // SAFETY: `emplacer_closure` meets the preconditions
-    let emplacer = unsafe { Emplacer::new(emplacer_closure) };
+    let emplacer = unsafe { Emplacer::from_fn(emplacer_closure) };
 
-    let emplacing_clousre = emplacable.into_closure();
+    let emplacing_clousre = emplacable.into_fn();
     emplacing_clousre(emplacer);
 
     // SAFETY: if `unsized_ret` respected `EmplacingClosure`'s safety contract,
@@ -1409,9 +1448,9 @@ where
     unsafe { uninit_box.assume_init() }
 }
 
-impl<T, C> Emplacable<[T], C>
+impl<T, F> Emplacable<[T], F>
 where
-    C: EmplacableFn<[T]>,
+    F: EmplacableFn<[T]>,
 {
     /// Turns this emplacer for a slice of `T`s into an owned [`Vec<T>`].
     #[cfg(feature = "alloc")]
@@ -1422,25 +1461,25 @@ where
 }
 
 #[cfg(feature = "alloc")]
-impl<T, C> From<Emplacable<[T], C>> for Vec<T>
+impl<T, F> From<Emplacable<[T], F>> for Vec<T>
 where
-    C: EmplacableFn<[T]>,
+    F: EmplacableFn<[T]>,
 {
     #[inline]
-    fn from(emplacable: Emplacable<[T], C>) -> Self {
+    fn from(emplacable: Emplacable<[T], F>) -> Self {
         box_new_with(emplacable).into_vec()
     }
 }
 
 #[cfg(feature = "alloc")]
-impl<T, C> FromIterator<Emplacable<T, C>> for Vec<T>
+impl<T, F> FromIterator<Emplacable<T, F>> for Vec<T>
 where
-    C: EmplacableFn<T>,
+    F: EmplacableFn<T>,
 {
     #[inline]
     fn from_iter<I>(iter: I) -> Self
     where
-        I: IntoIterator<Item = Emplacable<T, C>>,
+        I: IntoIterator<Item = Emplacable<T, F>>,
     {
         let mut vec = Vec::new();
         vec.extend(iter);
@@ -1449,16 +1488,16 @@ where
 }
 
 #[cfg(feature = "alloc")]
-impl<T, C> Extend<Emplacable<T, C>> for Vec<T>
+impl<T, F> Extend<Emplacable<T, F>> for Vec<T>
 where
-    C: EmplacableFn<T>,
+    F: EmplacableFn<T>,
 {
     #[inline]
     fn extend<I>(&mut self, iter: I)
     where
-        I: IntoIterator<Item = Emplacable<T, C>>,
+        I: IntoIterator<Item = Emplacable<T, F>>,
     {
-        fn extend_inner<T, C: EmplacableFn<T>, I: Iterator<Item = Emplacable<T, C>>>(
+        fn extend_inner<T, F: EmplacableFn<T>, I: Iterator<Item = Emplacable<T, F>>>(
             vec: &mut Vec<T>,
             iter: I,
         ) {
@@ -1473,9 +1512,9 @@ where
     }
 }
 
-impl<C> Emplacable<str, C>
+impl<F> Emplacable<str, F>
 where
-    C: EmplacableFn<str>,
+    F: EmplacableFn<str>,
 {
     /// Turns this emplacer for a string slice into an owned, heap-allocated [`String`].
     ///
@@ -1489,12 +1528,12 @@ where
 }
 
 #[cfg(feature = "alloc")]
-impl<C> From<Emplacable<str, C>> for String
+impl<F> From<Emplacable<str, F>> for String
 where
-    C: EmplacableFn<str>,
+    F: EmplacableFn<str>,
 {
     #[inline]
-    fn from(emplacable: Emplacable<str, C>) -> Self {
+    fn from(emplacable: Emplacable<str, F>) -> Self {
         box_new_with(emplacable).into_string()
     }
 }
@@ -1554,13 +1593,13 @@ where
 }
 
 #[cfg(feature = "alloc")]
-impl<T, C> From<Emplacable<T, C>> for Rc<T>
+impl<T, F> From<Emplacable<T, F>> for Rc<T>
 where
     T: ?Sized,
-    C: EmplacableFn<T>,
+    F: EmplacableFn<T>,
 {
     #[inline]
-    fn from(emplacable: Emplacable<T, C>) -> Self {
+    fn from(emplacable: Emplacable<T, F>) -> Self {
         rc_new_with(emplacable)
     }
 }
@@ -1622,13 +1661,13 @@ where
 }
 
 #[cfg(feature = "alloc")]
-impl<T, C> From<Emplacable<T, C>> for Arc<T>
+impl<T, F> From<Emplacable<T, F>> for Arc<T>
 where
     T: ?Sized,
-    C: EmplacableFn<T>,
+    F: EmplacableFn<T>,
 {
     #[inline]
-    fn from(emplacable: Emplacable<T, C>) -> Self {
+    fn from(emplacable: Emplacable<T, F>) -> Self {
         arc_new_with(emplacable)
     }
 }

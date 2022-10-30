@@ -109,7 +109,7 @@ impl<T> UnsizedVecProvider<T> for ::alloc::vec::Vec<T> {
 
         debug_assert!(index <= self.len());
 
-        let emplacable_closure = value.into_closure();
+        let emplacable_closure = value.into_fn();
 
         let emplacer_closure =
             &mut move |_, (), inner_closure: &mut dyn FnMut(*mut PhantomData<T>)| {
@@ -143,7 +143,7 @@ impl<T> UnsizedVecProvider<T> for ::alloc::vec::Vec<T> {
             };
 
         // SAFETY: `emplacer_closure` runs the closure with a valid pointer to `index`
-        let emplacer = unsafe { Emplacer::new(emplacer_closure) };
+        let emplacer = unsafe { Emplacer::from_fn(emplacer_closure) };
 
         emplacable_closure(emplacer);
     }
@@ -169,7 +169,7 @@ impl<T> UnsizedVecProvider<T> for ::alloc::vec::Vec<T> {
         // Copy element into the place
 
         // SAFETY: we call the closure right after we unwrap it
-        let emplacer_closure = unsafe { emplacer.into_inner() };
+        let emplacer_closure = unsafe { emplacer.into_fn() };
 
         emplacer_closure(Layout::new::<T>(), (), &mut |out_ptr| {
             if !out_ptr.is_null() {
@@ -210,7 +210,7 @@ impl<T> UnsizedVecProvider<T> for ::alloc::vec::Vec<T> {
     }
 
     fn push_with(&mut self, value: Emplacable<T, impl EmplacableFn<T>>) {
-        let emplacable_closure = value.into_closure();
+        let emplacable_closure = value.into_fn();
 
         let emplacer_closure =
             &mut move |_, (), inner_closure: &mut dyn FnMut(*mut PhantomData<T>)| {
@@ -226,7 +226,7 @@ impl<T> UnsizedVecProvider<T> for ::alloc::vec::Vec<T> {
             };
 
         // SAFETY: `emplacer_closure` runs the closure with a valid pointer to the end of the vec
-        let emplacer = unsafe { Emplacer::new(emplacer_closure) };
+        let emplacer = unsafe { Emplacer::from_fn(emplacer_closure) };
 
         emplacable_closure(emplacer);
     }
@@ -249,7 +249,7 @@ impl<T> UnsizedVecProvider<T> for ::alloc::vec::Vec<T> {
         // Copy element into the place
 
         // SAFETY: we call the closure right after we unwrap it
-        let emplace_closure = unsafe { emplacer.into_inner() };
+        let emplace_closure = unsafe { emplacer.into_fn() };
 
         emplace_closure(Layout::new::<T>(), (), &mut |out_ptr| {
             if !out_ptr.is_null() {
