@@ -37,6 +37,9 @@ jobs:
       - name: Run tests with careful
         run: cargo careful test --all
 
+      - name: Run tests with miri
+        run: cargo miri test -p emplacable
+
       - name: Run clippy
         run: cargo clippy --all --message-format=json | clippy-sarif | tee rust-clippy-results.sarif | sarif-fmt
 

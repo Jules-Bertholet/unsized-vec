@@ -98,14 +98,7 @@ pub extern crate alloc as alloc_crate;
 extern crate std;
 
 #[cfg(feature = "alloc")]
-use alloc_crate::{
-    alloc::{self, handle_alloc_error},
-    boxed::Box,
-    rc::Rc,
-    string::String,
-    sync::Arc,
-    vec::Vec,
-};
+use alloc_crate::{alloc, boxed::Box, rc::Rc, string::String, sync::Arc, vec::Vec};
 use core::{
     alloc::{AllocError, Allocator, Layout},
     cell::Cell,
@@ -154,7 +147,7 @@ pub mod macro_exports {
 ///
 /// dbg!(&my_box);
 /// ```
-#[cfg(feature = "alloc")]
+#[cfg(all(feature = "alloc", not(miri)))]
 #[macro_export]
 macro_rules! unsize {
     ($e:expr, ($src:ty) -> $dst:ty) => {{
@@ -228,7 +221,7 @@ unsafe impl<T> Allocator for ImplementationDetailDoNotUse<T> {
 /// let boxed_str: Box<str> = box_new(by_value_str!("why hello there"));
 /// dbg!(&*boxed_str);
 /// ```
-#[cfg(feature = "alloc")]
+#[cfg(all(feature = "alloc", not(miri)))]
 #[macro_export]
 macro_rules! by_value_str {
     ($s:literal) => {{
@@ -818,7 +811,7 @@ impl<'s> IntoEmplacable<str> for &'s str {
                     // SAFETY: copying value where it belongs.
                     unsafe {
                         ptr::copy_nonoverlapping(
-                            addr_of!(self).cast::<u8>(),
+                            addr_of!(*self).cast::<u8>(),
                             out_ptr.cast(),
                             self.len(),
                         );
@@ -856,7 +849,7 @@ impl<'s> IntoEmplacable<CStr> for &'s CStr {
                     // SAFETY: copying value where it belongs.
                     unsafe {
                         ptr::copy_nonoverlapping(
-                            addr_of!(self).cast::<u8>(),
+                            addr_of!(*self).cast::<u8>(),
                             out_ptr.cast(),
                             size_of_val,
                         );
@@ -898,7 +891,7 @@ impl<'s> IntoEmplacable<OsStr> for &'s OsStr {
                     // `Emplacer` preconditions say this can only be run once.
                     unsafe {
                         ptr::copy_nonoverlapping(
-                            addr_of!(self).cast::<u8>(),
+                            addr_of!(*self).cast::<u8>(),
                             out_ptr.cast(),
                             size_of_val,
                         );
@@ -941,7 +934,7 @@ impl<'s> IntoEmplacable<Path> for &'s Path {
                     // `Emplacer` preconditions say this can only be run once.
                     unsafe {
                         ptr::copy_nonoverlapping(
-                            addr_of!(self).cast::<u8>(),
+                            addr_of!(*self).cast::<u8>(),
                             out_ptr.cast(),
                             size_of_val,
                         );
@@ -1057,7 +1050,7 @@ impl<T: ?Sized> IntoEmplacable<T> for Box<T> {
 }
 
 #[cfg(feature = "alloc")]
-impl<T> From<Box<T>> for Emplacable<T, <Box<T> as IntoEmplacable<T>>::Closure> {
+impl<T: ?Sized> From<Box<T>> for Emplacable<T, <Box<T> as IntoEmplacable<T>>::Closure> {
     #[inline]
     fn from(value: Box<T>) -> Self {
         <Box<T> as IntoEmplacable<T>>::into_emplacable(value)
@@ -1068,11 +1061,13 @@ impl<T> From<Box<T>> for Emplacable<T, <Box<T> as IntoEmplacable<T>>::Closure> {
 impl<T> IntoEmplacable<[T]> for Vec<T> {
     type Closure = impl EmplacableFn<[T]>;
 
-    fn into_emplacable(mut self) -> Emplacable<[T], Self::Closure> {
+    fn into_emplacable(self) -> Emplacable<[T], Self::Closure> {
         let closure = move |emplacer: &mut Emplacer<[T]>| {
-            let ptr = self.as_mut_ptr();
-            let len = self.len();
-            let capacity = self.capacity();
+            let mut vec = ManuallyDrop::new(self);
+
+            let ptr = vec.as_mut_ptr();
+            let len = vec.len();
+            let capacity = vec.capacity();
             // SAFETY: values come from the vec
             let layout = unsafe {
                 Layout::from_size_align_unchecked(
@@ -1086,12 +1081,13 @@ impl<T> IntoEmplacable<[T]> for Vec<T> {
             emplacer_closure(layout, len, &mut |out_ptr| {
                 if !out_ptr.is_null() {
                     // SAFETY: checked for null, copying correct number of bytes.
+                    // `Vec` is in a `ManuallyDrop`, so no double drop
                     unsafe {
                         ptr::copy_nonoverlapping(ptr, out_ptr.cast::<T>(), len);
                     }
                 } else {
-                    for elem in &mut self {
-                        // SAFETY: we later forget `Vec`, so no double drop
+                    for elem in &mut *vec {
+                        // SAFETY: `Vec` is in a `ManuallyDrop`, so no double drop
                         unsafe {
                             ptr::drop_in_place(elem);
                         }
@@ -1100,7 +1096,8 @@ impl<T> IntoEmplacable<[T]> for Vec<T> {
             });
 
             if layout.size() > 0 {
-                // SAFETY: deallocating what the `Vec` allocated
+                // SAFETY: deallocating what the `Vec` allocated. The `Vec` is in a `ManuallyDrop`,
+                // so no double-drop
                 unsafe { alloc::dealloc(ptr.cast(), layout) }
             }
         };
@@ -1287,7 +1284,7 @@ where
     /// If `emplacer_fn` runs the closure it receives as its thrid argument, it must do so before returning.
     ///
     /// `emplacer_fn` is allowed to unwind or otherwise diverge. But if it runs the closure it receives as its third argument,
-    /// then once it does so it is no longer allowed to unwind.s
+    /// then once that inner closure returns, `emplacer_fn` is no longer allowed to unwind.
     ///
     /// The `emplacer_fn` can't assume that is has received full ownership of
     /// the value written to the pointer of the inner closure, until the moment `emplacer_fn`
@@ -1333,7 +1330,7 @@ where
 ///
 /// You will need `#![feature(unsized_fn_params)]`
 /// to call this.
-#[cfg(feature = "alloc")]
+#[cfg(all(feature = "alloc", not(miri)))]
 #[inline]
 pub fn box_new<T>(x: T) -> Box<T>
 where
@@ -1346,7 +1343,7 @@ where
         let maybe_ptr = unsafe { alloc::alloc(layout) };
 
         if maybe_ptr.is_null() {
-            handle_alloc_error(layout)
+            alloc::handle_alloc_error(layout)
         };
 
         // SAFETY: copying value into allocation. We make sure to forget it after
@@ -1543,7 +1540,7 @@ where
 ///
 /// You will need `#![feature(unsized_fn_params)]`
 /// to call this.
-#[cfg(feature = "alloc")]
+#[cfg(all(feature = "alloc", not(miri)))]
 #[inline]
 pub fn box_pin<T>(x: T) -> Pin<Box<T>>
 where
@@ -1570,7 +1567,7 @@ where
 ///
 /// You will need `#![feature(unsized_fn_params)]`
 /// to call this.
-#[cfg(feature = "alloc")]
+#[cfg(all(feature = "alloc", not(miri)))]
 #[inline]
 pub fn rc_new<T>(value: T) -> Rc<T>
 where
@@ -1609,7 +1606,7 @@ where
 ///
 /// You will need `#![feature(unsized_fn_params)]`
 /// to call this.
-#[cfg(feature = "alloc")]
+#[cfg(all(feature = "alloc", not(miri)))]
 #[inline]
 pub fn rc_pin<T>(x: T) -> Pin<Rc<T>>
 where
@@ -1638,7 +1635,7 @@ where
 ///
 /// You will need `#![feature(unsized_fn_params)]`
 /// to call this.
-#[cfg(feature = "alloc")]
+#[cfg(all(feature = "alloc", not(miri)))]
 #[inline]
 pub fn arc_new<T>(value: T) -> Arc<T>
 where
@@ -1677,7 +1674,7 @@ where
 ///
 /// You will need `#![feature(unsized_fn_params)]`
 /// to call this.
-#[cfg(feature = "alloc")]
+#[cfg(all(feature = "alloc", not(miri)))]
 #[inline]
 pub fn arc_pin<T>(x: T) -> Pin<Arc<T>>
 where
