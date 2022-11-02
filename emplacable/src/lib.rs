@@ -813,7 +813,7 @@ impl<'s> IntoEmplacable<str> for &'s str {
                         ptr::copy_nonoverlapping(
                             addr_of!(*self).cast::<u8>(),
                             out_ptr.cast(),
-                            self.len(),
+                            layout.size(),
                         );
                     }
                 }
@@ -843,7 +843,6 @@ impl<'s> IntoEmplacable<CStr> for &'s CStr {
         let closure = move |emplacer: &mut Emplacer<CStr>| {
             // Safety: we call the closure right after
             let emplacer_closure = unsafe { emplacer.into_fn() };
-            let size_of_val = layout.size();
             emplacer_closure(layout, metadata, &mut |out_ptr| {
                 if !out_ptr.is_null() {
                     // SAFETY: copying value where it belongs.
@@ -851,7 +850,7 @@ impl<'s> IntoEmplacable<CStr> for &'s CStr {
                         ptr::copy_nonoverlapping(
                             addr_of!(*self).cast::<u8>(),
                             out_ptr.cast(),
-                            size_of_val,
+                            layout.size(),
                         );
                     }
                 }
@@ -883,7 +882,6 @@ impl<'s> IntoEmplacable<OsStr> for &'s OsStr {
         let closure = move |emplacer: &mut Emplacer<OsStr>| {
             // Safety: we call the closure right after
             let emplacer_closure = unsafe { emplacer.into_fn() };
-            let size_of_val = layout.size();
             emplacer_closure(layout, metadata, &mut |out_ptr| {
                 if !out_ptr.is_null() {
                     // SAFETY: copying value where it belongs.
@@ -893,7 +891,7 @@ impl<'s> IntoEmplacable<OsStr> for &'s OsStr {
                         ptr::copy_nonoverlapping(
                             addr_of!(*self).cast::<u8>(),
                             out_ptr.cast(),
-                            size_of_val,
+                            layout.size(),
                         );
                     }
                 }
@@ -926,7 +924,6 @@ impl<'s> IntoEmplacable<Path> for &'s Path {
         let closure = move |emplacer: &mut Emplacer<Path>| {
             // Safety: we call the closure right after
             let emplacer_closure = unsafe { emplacer.into_fn() };
-            let size_of_val = layout.size();
             emplacer_closure(layout, metadata, &mut |out_ptr| {
                 if !out_ptr.is_null() {
                     // SAFETY: copying value where it belongs.
@@ -936,7 +933,7 @@ impl<'s> IntoEmplacable<Path> for &'s Path {
                         ptr::copy_nonoverlapping(
                             addr_of!(*self).cast::<u8>(),
                             out_ptr.cast(),
-                            size_of_val,
+                            layout.size(),
                         );
                     }
                 }
