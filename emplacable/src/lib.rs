@@ -90,15 +90,16 @@
 )]
 #![no_std]
 
-#[doc(hidden)]
 #[cfg(feature = "alloc")]
+#[doc(hidden)]
 pub extern crate alloc as alloc_crate;
 
 #[cfg(feature = "std")]
 extern crate std;
 
 #[cfg(feature = "alloc")]
-use alloc_crate::{alloc, boxed::Box, rc::Rc, string::String, sync::Arc, vec::Vec};
+use alloc_crate::{alloc, boxed::Box, ffi::CString, rc::Rc, string::String, sync::Arc, vec::Vec};
+
 use core::{
     alloc::{AllocError, Allocator, Layout},
     cell::Cell,
@@ -110,7 +111,10 @@ use core::{
     ptr::{self, addr_of, NonNull, Pointee},
 };
 #[cfg(feature = "std")]
-use std::{ffi::OsStr, path::Path};
+use std::{
+    ffi::{OsStr, OsString},
+    path::{Path, PathBuf},
+};
 
 #[doc(hidden)]
 pub mod macro_exports {
@@ -275,7 +279,7 @@ unsafe impl Allocator for NonAllocator {
     unsafe fn deallocate(&self, _: NonNull<u8>, _: Layout) {}
 }
 
-// FIXME revisit once ICE https://github.com/rust-lang/rust/issues/103666 is fixed
+// FIXME enable once https://github.com/rust-lang/rust/issues/109020 is fixed
 /*
 type WithEmplacableForFn<'a, T: ?Sized + 'a> = impl EmplacableFn<T> + 'a;
 
@@ -290,34 +294,33 @@ type WithEmplacableForFn<'a, T: ?Sized + 'a> = impl EmplacableFn<T> + 'a;
 /// ```
 /// #![feature(allocator_api, ptr_metadata, unsized_fn_params)]
 ///
-/// use emplacable::{box_new_with, with_emplacable_for, unsize};
+/// use emplacable::{box_new_with, unsize, with_emplacable_for};
 ///
-/// let b: Box<[i32]> = with_emplacable_for(unsize!([23, 4 ,32], ([i32; 3]) -> [i32]), box_new_with);
-/// assert_eq!(b[0], 23);
-///
-///
-///
+/// let b = with_emplacable_for(unsize!([23_i32, 4, 32], ([i32; 3]) -> [i32]), |e| {
+///   box_new_with(e)
+/// });
+/// assert_eq!(&*b, &[23_i32, 4, 32]);
 /// ```
 #[inline]
-pub fn with_emplacable_for<T, F, R>(mut val: T, mut f: F) -> R
+pub fn with_emplacable_for<'a, T: 'a, F, R>(mut val: T, mut f: F) -> R
 where
     T: ?Sized,
-    F: for<'a> FnMut(Emplacable<T, WithEmplacableForFn<'a, T>>) -> R,
+    F: for<'b> FnMut(Emplacable<T, WithEmplacableForFn<'b, T>>) -> R,
 {
     /// SAFETY: `val` must point to a valid `T`. `val` must not be dropped
     /// after this function completes.
     #[inline]
     unsafe fn with_emplacable_for_inner<'a, T: ?Sized + 'a, R>(
         val: &'a mut T,
-        f: &mut dyn for<'b> FnMut(Emplacable<T, WithEmplacableForFn<'b, T>>) -> R,
+        f: &mut dyn FnMut(Emplacable<T, WithEmplacableForFn<'a, T>>) -> R,
     ) -> R {
-        fn with_emplacable_closure<'a, T: ?Sized>(val: &'a mut T) -> WithEmplacableForFn<'a, T> {
+        fn with_emplacable_closure<T: ?Sized>(val: &mut T) -> WithEmplacableForFn<'_, T> {
             move |emplacer: &mut Emplacer<T>| {
                 // SAFETY: We
-                let layout = Layout::for_value(unsafe { &*val });
+                let layout = Layout::for_value(val);
                 let metadata = ptr::metadata(val);
                 // Safety: we call the closure right after
-                let emplacer_closure = unsafe { emplacer.into_inner() };
+                let emplacer_closure = unsafe { emplacer.into_fn() };
                 emplacer_closure(layout, metadata, &mut |out_ptr| {
                     if !out_ptr.is_null() {
                         // SAFETY: copying value where it belongs.
@@ -325,7 +328,7 @@ where
                         // `Emplacer` preconditions say this can only be run once.
                         unsafe {
                             ptr::copy_nonoverlapping(
-                                addr_of_mut!(*val).cast::<u8>(),
+                                ptr::addr_of_mut!(*val).cast::<u8>(),
                                 out_ptr.cast(),
                                 layout.size(),
                             );
@@ -339,32 +342,15 @@ where
         }
 
         // SAFETY: closure fulfills safety preconditions
-        let emplacable = unsafe { Emplacable::from_closure(with_emplacable_closure(val)) };
+        let emplacable = unsafe { Emplacable::from_fn(with_emplacable_closure(val)) };
 
         f(emplacable)
     }
 
     let ret = unsafe { with_emplacable_for_inner(&mut val, &mut f) };
-    //mem::forget_unsized(val);
+    mem::forget_unsized(val);
     ret
-}
-
-#[test]
-fn testddddd() {
-    let b: Box<[i32]> =
-        with_emplacable_for(unsize!([23, 4 ,32], ([i32; 3]) -> [i32]), box_new_with);
-
-    let e = with_emplacable_for(*b, |e| {
-        let closure = Box::new(e.into_closure());
-        let closure: Box<dyn EmplacableFn<[i32]>> = closure;
-        closure
-    });
-
-    let e2 = unsafe { Emplacable::from_closure(e) };
-
-    let b = box_new_with(e2);
-}
-*/
+}*/
 
 /// Alias of [`for<'a> FnOnce(&'a mut Emplacer<T>)`](Emplacer<T>).
 pub trait EmplacableFn<T>: for<'a> FnOnce(&'a mut Emplacer<T>)
@@ -1530,6 +1516,39 @@ where
     #[inline]
     fn from(emplacable: Emplacable<str, F>) -> Self {
         box_new_with(emplacable).into_string()
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl<F> From<Emplacable<CStr, F>> for CString
+where
+    F: EmplacableFn<CStr>,
+{
+    #[inline]
+    fn from(emplacable: Emplacable<CStr, F>) -> Self {
+        box_new_with(emplacable).into_c_string()
+    }
+}
+
+#[cfg(feature = "std")]
+impl<F> From<Emplacable<OsStr, F>> for OsString
+where
+    F: EmplacableFn<OsStr>,
+{
+    #[inline]
+    fn from(emplacable: Emplacable<OsStr, F>) -> Self {
+        box_new_with(emplacable).into_os_string()
+    }
+}
+
+#[cfg(feature = "std")]
+impl<F> From<Emplacable<Path, F>> for PathBuf
+where
+    F: EmplacableFn<Path>,
+{
+    #[inline]
+    fn from(emplacable: Emplacable<Path, F>) -> Self {
+        box_new_with(emplacable).into_path_buf()
     }
 }
 

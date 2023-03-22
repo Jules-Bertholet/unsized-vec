@@ -1,6 +1,6 @@
 [package]
 name = "unsized-vec"
-version = "0.0.2-alpha.5"
+version = "0.0.2-alpha.6"
 edition = "2021"
 authors = ["Jules Bertholet <julesbertholet@quoi.xyz>"]
 description = "Like Vec, but for unsized values"
@@ -13,10 +13,10 @@ categories = ["data-structures", "no-std"]
 members = ["emplacable"]
 
 [dependencies]
-emplacable = { path = "emplacable", version = "0.1.0-alpha.5", default-features = false, features = [
+emplacable = { path = "emplacable", version = "0.1.0-alpha.6", default-features = false, features = [
     "alloc",
 ] }
-serde = { version = "1.0.147", optional = true, default-features = false }
+serde = { version = "1.0.158", optional = true, default-features = false }
 
 [package.metadata.docs.rs]
 all-features = true

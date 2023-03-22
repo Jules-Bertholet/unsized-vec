@@ -4,17 +4,17 @@ version = 3
 
 [[package]]
 name = "emplacable"
-version = "0.1.0-alpha.5"
+version = "0.1.0-alpha.6"
 
 [[package]]
 name = "serde"
-version = "1.0.147"
+version = "1.0.158"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d193d69bae983fc11a79df82342761dfbf28a99fc8d203dca4c3c1b590948965"
+checksum = "771d4d9c4163ee138805e12c710dd365e4f44be8be0503cb1bb9eb989425d9c9"
 
 [[package]]
 name = "unsized-vec"
-version = "0.0.2-alpha.5"
+version = "0.0.2-alpha.6"
 dependencies = [
  "emplacable",
  "serde",
