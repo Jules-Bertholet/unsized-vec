@@ -170,6 +170,7 @@ pub mod macro_exports {
     unsafe impl<T> Allocator for &ImplementationDetailDoNotUse<T> {
         fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
             debug_assert_eq!(layout, Layout::new::<T>());
+            #[cfg(debug_assertions)]
             debug_assert!(!self.allocated);
             // SAFETY: Address of `self.0` can't be null
             let thin_ptr = unsafe { NonNull::new_unchecked(self.storage.as_ptr()) };
