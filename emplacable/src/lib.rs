@@ -77,7 +77,6 @@
 )]
 #![feature(
     allocator_api,
-    array_zip,
     closure_lifetime_binder,
     forget_unsized,
     impl_trait_in_assoc_type,
@@ -499,7 +498,7 @@ where
     /// Runs the `Emplacable` closure,
     /// but doesn't run the "inner closure",
     /// so the value of type `T` is forgotten,
-    /// and its destrutor is not run.
+    /// and its destructor is not run.
     ///
     /// If you want to drop the `T` and run its destructor,
     /// drop the `Emplacable` instead.
@@ -1176,23 +1175,29 @@ impl<T, const N: usize, F: EmplacableFn<T>> IntoEmplacable<[T; N]> for [Emplacab
                             i.wrapping_sub(1)
                         });
 
-                        let indexed_elem_emplacables = indexes.zip(elem_emplacables);
-                        indexed_elem_emplacables.map(|(index, elem_emplacable)| {
-                            let elem_emplacable_closure = elem_emplacable.into_fn();
-                            let elem_emplacer_closure = &mut move |
-                                _: Layout,
-                                (),
-                                inner_closure: &mut dyn FnMut(*mut PhantomData<T>),
-                            | {
-                                // SAFETY: by fn precondition
-                                inner_closure(unsafe { arr_out_ptr.cast::<T>().add(index).cast() });
-                            };
+                        indexes
+                            .into_iter()
+                            .zip(elem_emplacables.into_iter())
+                            .for_each(|(index, elem_emplacable)| {
+                                let elem_emplacable_closure = elem_emplacable.into_fn();
+                                let elem_emplacer_closure =
+                                    &mut move |_: Layout,
+                                               (),
+                                               inner_closure: &mut dyn FnMut(
+                                        *mut PhantomData<T>,
+                                    )| {
+                                        // SAFETY: by fn precondition
+                                        inner_closure(unsafe {
+                                            arr_out_ptr.cast::<T>().add(index).cast()
+                                        });
+                                    };
 
-                            // SAFETY: `elem_emplacer_closure` passes a pointer with the correct offset from the
-                            // start of the allocation
-                            let elem_emplacer = unsafe { Emplacer::from_fn(elem_emplacer_closure) };
-                            elem_emplacable_closure(elem_emplacer);
-                        });
+                                let elem_emplacer =
+                                    // SAFETY: `elem_emplacer_closure` passes a pointer with the correct offset from the
+                                    // start of the allocation
+                                    unsafe { Emplacer::from_fn(elem_emplacer_closure) };
+                                elem_emplacable_closure(elem_emplacer);
+                            });
                     } else {
                         // Dropping the array of emplacers drops each emplacer,
                         // which drops the `T`s as well
