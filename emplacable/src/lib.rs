@@ -64,7 +64,7 @@
 //! [`Unsize`]: core::marker::Unsize
 //! [`CoerceUnsized`]: core::ops::CoerceUnsized
 
-#![deny(
+#![forbid(
     unsafe_op_in_unsafe_fn,
     clippy::alloc_instead_of_core,
     clippy::std_instead_of_alloc,
@@ -102,14 +102,13 @@ extern crate std;
 use alloc_crate::{alloc, boxed::Box, ffi::CString, rc::Rc, string::String, sync::Arc, vec::Vec};
 
 use core::{
-    alloc::{AllocError, Allocator, Layout},
-    cell::Cell,
+    alloc::Layout,
     ffi::CStr,
     marker::{PhantomData, Unsize},
     mem::{self, ManuallyDrop, MaybeUninit},
     ops::FnMut,
     pin::Pin,
-    ptr::{self, addr_of, NonNull, Pointee},
+    ptr::{self, addr_of, Pointee},
 };
 #[cfg(feature = "std")]
 use std::{
@@ -123,6 +122,87 @@ pub mod macro_exports {
     pub use alloc_crate;
     pub use core;
     pub use u8;
+
+    use alloc_crate::boxed::Box;
+    use core::{
+        alloc::{AllocError, Allocator, Layout},
+        cell::Cell,
+        marker::{PhantomData, Unsize},
+        mem::{self, MaybeUninit},
+        ptr::{self, NonNull},
+    };
+
+    // Implementation detail of `unsize` macro.
+    #[cfg_attr(not(debug_assertions), repr(transparent))]
+    pub struct ImplementationDetailDoNotUse<T> {
+        storage: Cell<MaybeUninit<T>>,
+        #[cfg(debug_assertions)]
+        allocated: bool,
+    }
+
+    pub type ImplementationDetailDoNotUseBox<'a, T, S> =
+        Box<T, &'a ImplementationDetailDoNotUse<S>>;
+
+    pub fn do_not_use_box_unsize<T, S>(
+        val: S,
+        a: &ImplementationDetailDoNotUse<S>,
+    ) -> ImplementationDetailDoNotUseBox<'_, T, S>
+    where
+        T: ?Sized,
+        S: Unsize<T>,
+    {
+        let boxed: ImplementationDetailDoNotUseBox<S, S> = Box::new_in(val, a);
+        boxed
+    }
+
+    impl<T> ImplementationDetailDoNotUse<T> {
+        pub const NEW: Self = Self {
+            storage: Cell::new(MaybeUninit::uninit()),
+            #[cfg(debug_assertions)]
+            allocated: false,
+        };
+    }
+
+    // SAFETY: this is an unsound implementation of the trait,
+    // you can't `allocate` more than once without UB. We are careful not
+    // to break this invariant inside the macro, but `ImplementationDetailDoNotUse`
+    // should not be leaked to arbritrary code!
+    unsafe impl<T> Allocator for &ImplementationDetailDoNotUse<T> {
+        fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
+            debug_assert_eq!(layout, Layout::new::<T>());
+            debug_assert!(!self.allocated);
+            // SAFETY: Address of `self.0` can't be null
+            let thin_ptr = unsafe { NonNull::new_unchecked(self.storage.as_ptr()) };
+            Ok(NonNull::from_raw_parts(
+                thin_ptr.cast(),
+                mem::size_of::<T>(),
+            ))
+        }
+
+        unsafe fn deallocate(&self, _ptr: NonNull<u8>, _layout: Layout) {}
+    }
+
+    // Implementation detail of `by_value_str`.
+    pub struct NonAllocator<'a>(PhantomData<&'a mut ()>);
+
+    // SAFETY: `allocate` is a stub that is never run and always panics
+    unsafe impl<'a> Allocator for NonAllocator<'a> {
+        fn allocate(&self, _: Layout) -> Result<NonNull<[u8]>, AllocError> {
+            unreachable!()
+        }
+
+        #[inline]
+        unsafe fn deallocate(&self, _: NonNull<u8>, _: Layout) {}
+    }
+
+    pub type FakeBoxStr<'a> = Box<str, NonAllocator<'a>>;
+
+    pub fn fake_box_str<const LEN: usize>(buf: &mut [MaybeUninit<u8>; LEN]) -> FakeBoxStr<'_> {
+        let wide_ptr: *mut str = ptr::from_raw_parts_mut(buf.as_mut_ptr().cast(), LEN);
+
+        // SAFETY: `NonAllocator::deallocate()` is a no-op
+        unsafe { Box::from_raw_in(wide_ptr, NonAllocator(PhantomData)) }
+    }
 }
 
 /// Helper for coercing values to unsized types.
@@ -133,16 +213,15 @@ pub mod macro_exports {
 /// If you have a value `val` of type `SizedType`, and you want to coerce it
 /// to `UnsizedType`, write `unsize!(val, (SizedType) -> UnsizedType))`.
 ///
-/// Requires `#![feature(allocator_api, ptr_metadata)]`,
-/// and probably useless without `unsized_fn_params` or `unsized_locals`.
+/// Probably useless without the `unsized_fn_params` or `unsized_locals` nightly features.
 ///
-/// Also requires the `alloc` crate feature
+/// Requires the `alloc` crate feature
 /// (though doesn't actually allocate on the heap).
 ///
 /// # Example
 ///
 /// ```
-/// #![feature(allocator_api, ptr_metadata, unsized_fn_params)]
+/// #![feature(unsized_fn_params)]
 ///
 /// use core::fmt::Debug;
 ///
@@ -163,57 +242,28 @@ macro_rules! unsize {
         // 3. Coerce the box to hold an unsized value
         // 4. Move out of the box
         use $crate::{
-            ImplementationDetailDoNotUse,
             macro_exports::{
-                alloc_crate::boxed::Box,
+                do_not_use_box_unsize,
+                ImplementationDetailDoNotUse,
+                ImplementationDetailDoNotUseBox,
             },
         };
 
         let val: $src = $e;
 
         let new_alloc: ImplementationDetailDoNotUse<$src> = ImplementationDetailDoNotUse::NEW;
-        let boxed_sized: Box<$src, &ImplementationDetailDoNotUse<$src>> = Box::new_in(val, &new_alloc);
-        let boxed_unsized: Box<$dst, &ImplementationDetailDoNotUse<$src>> = boxed_sized;
+        let boxed_unsized: ImplementationDetailDoNotUseBox<$dst, $src> = do_not_use_box_unsize(val, &new_alloc);
 
         *boxed_unsized
     }};
 }
 
-// Implementation detail of `unsize` macro.
-#[doc(hidden)]
-#[repr(transparent)]
-pub struct ImplementationDetailDoNotUse<T>(Cell<MaybeUninit<T>>);
-
-#[doc(hidden)]
-impl<T> ImplementationDetailDoNotUse<T> {
-    pub const NEW: Self = Self(Cell::new(MaybeUninit::uninit()));
-}
-
-// SAFETY: this is an unsound implementation of the trait,
-// you can't `allocate` more than once without UB. We are careful not
-// to break this invariant inside the macro, but `ImplementationDetailDoNotUse`
-// should not be leaked to arbritrary code!
-unsafe impl<T> Allocator for ImplementationDetailDoNotUse<T> {
-    fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
-        debug_assert_eq!(layout, Layout::new::<T>());
-        // SAFETY: Address of `self.0` can't be null
-        let thin_ptr = unsafe { NonNull::new_unchecked(self.0.as_ptr()) };
-        Ok(NonNull::from_raw_parts(
-            thin_ptr.cast(),
-            mem::size_of::<T>(),
-        ))
-    }
-
-    unsafe fn deallocate(&self, _ptr: NonNull<u8>, _layout: Layout) {}
-}
-
 /// Construct a `str` from a string literal,
 /// in its dereferenced form.
 ///
-/// Requires `#![feature(allocator_api, ptr_metadata)]`,
-/// and probably useless without `unsized_fn_params` or `unsized_locals`.
+/// Probably useless without the `unsized_fn_params` or `unsized_locals` nightly features.
 ///
-/// Also requires the `alloc` crate feature
+/// Requires the `alloc` crate feature
 /// (though doesn't actually allocate on the heap).
 ///
 /// # Example
@@ -235,18 +285,13 @@ macro_rules! by_value_str {
         // 2. Copy the contents of the constant into a buffer
         // 5. Convert a pointer into the buffer into a `Box<str>`
         // 4. Move out of the box
-        use $crate::{
-            macro_exports::{
-                alloc_crate::boxed::Box,
-                core::{
-                    alloc::{AllocError, Allocator, Layout},
-                    cell::Cell,
-                    mem::{self, MaybeUninit},
-                    ptr::{self, addr_of_mut, NonNull},
-                },
-                u8,
+        use $crate::macro_exports::{
+            alloc_crate::boxed::Box,
+            core::{
+                mem::MaybeUninit,
+                ptr::{self, addr_of_mut},
             },
-            NonAllocator,
+            fake_box_str, u8,
         };
 
         const STRING: &str = $s;
@@ -258,26 +303,9 @@ macro_rules! by_value_str {
             ptr::copy(STRING.as_ptr().cast::<u8>(), addr_of_mut!(buf).cast(), LEN);
         }
 
-        let wide_ptr: *mut str = ptr::from_raw_parts_mut(addr_of_mut!(buf).cast(), LEN);
-
-        // SAFETY: `NonAllocator::deref()`
-        let boxed_str: Box<str, NonAllocator> = unsafe { Box::from_raw_in(wide_ptr, NonAllocator) };
-        *boxed_str
+        let boxed = fake_box_str(&mut buf);
+        *boxed
     }};
-}
-
-// Implementation detail of `by_value_str`.
-#[doc(hidden)]
-pub struct NonAllocator;
-
-// SAFETY: `allocate` is a stub that is never run and always panics
-unsafe impl Allocator for NonAllocator {
-    fn allocate(&self, _: Layout) -> Result<NonNull<[u8]>, AllocError> {
-        unreachable!()
-    }
-
-    #[inline]
-    unsafe fn deallocate(&self, _: NonNull<u8>, _: Layout) {}
 }
 
 // FIXME enable once https://github.com/rust-lang/rust/issues/109020 is fixed

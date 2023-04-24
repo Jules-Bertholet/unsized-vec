@@ -62,7 +62,7 @@
 //! [`push`]: UnsizedVec::push
 //! [`push_unsize`]: UnsizedVec::push_unsize
 
-#![deny(unsafe_op_in_unsafe_fn)]
+#![forbid(unsafe_op_in_unsafe_fn)]
 #![warn(
     missing_docs,
     clippy::semicolon_if_nothing_returned,

@@ -1,4 +1,4 @@
-#![feature(allocator_api, ptr_metadata, unsized_fn_params)]
+#![feature(unsized_fn_params)]
 
 use std::fmt::Debug;
 
