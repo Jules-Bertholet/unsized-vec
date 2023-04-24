@@ -80,6 +80,7 @@
     array_zip,
     closure_lifetime_binder,
     forget_unsized,
+    impl_trait_in_assoc_type,
     min_specialization,
     ptr_metadata,
     strict_provenance,
