@@ -148,7 +148,7 @@ impl<T> UnsizedVecProvider<T> for ::alloc::vec::Vec<T> {
         emplacable_closure(emplacer);
     }
 
-    unsafe fn remove_into_unchecked(&mut self, index: usize, emplacer: &mut Emplacer<T>) {
+    unsafe fn remove_into_unchecked(&mut self, index: usize, emplacer: &mut Emplacer<'_, T>) {
         debug_assert!(index < self.len());
 
         // SAFETY: precondition of function
@@ -231,7 +231,7 @@ impl<T> UnsizedVecProvider<T> for ::alloc::vec::Vec<T> {
         emplacable_closure(emplacer);
     }
 
-    unsafe fn pop_into_unchecked(&mut self, emplacer: &mut Emplacer<T>) {
+    unsafe fn pop_into_unchecked(&mut self, emplacer: &mut Emplacer<'_, T>) {
         debug_assert!(!self.is_empty());
 
         // Set new length of vector

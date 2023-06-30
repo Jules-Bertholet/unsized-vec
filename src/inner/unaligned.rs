@@ -734,7 +734,7 @@ impl<T: ?Sized> UnsizedVecProvider<T> for UnalignedVecInner<T> {
         emplacable_closure(emplacer);
     }
 
-    unsafe fn remove_into_unchecked(&mut self, index: usize, emplacer: &mut Emplacer<T>) {
+    unsafe fn remove_into_unchecked(&mut self, index: usize, emplacer: &mut Emplacer<'_, T>) {
         debug_assert!(index < self.len());
 
         // We can't remove the metadata yet, as `emplacer_closure` might unwind,
@@ -898,7 +898,7 @@ impl<T: ?Sized> UnsizedVecProvider<T> for UnalignedVecInner<T> {
     }
 
     #[inline]
-    unsafe fn pop_into_unchecked(&mut self, emplacer: &mut Emplacer<T>) {
+    unsafe fn pop_into_unchecked(&mut self, emplacer: &mut Emplacer<'_, T>) {
         debug_assert!(!self.elems_info.is_empty());
 
         // SAFETY: precondition of function
@@ -1059,7 +1059,7 @@ impl<T: ?Sized> UnsizedVecImpl for T {
 
 macro_rules! iter_ref {
     ($iter_ty:ident, $from_raw_parts:ident $($muta:ident)?) => {
-        pub(in super::super) struct $iter_ty<'a, T: ?Sized + 'a> {
+        pub(in super::super) struct $iter_ty<'a, T: ?Sized> {
             elems_info: core::slice::Iter<'a, ElementInfo<T>>,
             ptr: NonNull<()>,
             start_offset: ValidSizeUnaligned,

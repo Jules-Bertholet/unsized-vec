@@ -27,6 +27,8 @@ fn test_sized() {
     assert_eq!(vec[1], 34);
 }
 
+const EMPTY_SLICE: &[Box<i32>] = &[];
+
 #[test]
 fn test_unsized_drop() {
     let mut vec: UnsizedVec<[Box<i32>]> = UnsizedVec::new();
@@ -39,7 +41,7 @@ fn test_unsized_drop() {
 
     let slice: Box<[Box<i32>]> = Box::new([]);
     vec.push(*slice);
-    assert_eq!(&vec[1], &[]);
+    assert_eq!(&vec[1], EMPTY_SLICE);
 
     let slice: Box<[Box<i32>]> = Box::new([Box::new(4), Box::new(7), Box::new(3)]);
     vec.push(*slice);
@@ -74,7 +76,7 @@ fn test_unsized_drop() {
         ]
     );
     assert_eq!(&vec[1], &[Box::new(1), Box::new(2)]);
-    assert_eq!(&vec[2], &[]);
+    assert_eq!(&vec[2], EMPTY_SLICE);
 
     vec.shrink_to_fit();
 
@@ -93,7 +95,7 @@ fn test_unsized_drop() {
             Box::new(-1)
         ]
     );
-    assert_eq!(&vec[1], &[]);
+    assert_eq!(&vec[1], EMPTY_SLICE);
 }
 
 #[test]

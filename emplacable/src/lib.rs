@@ -36,6 +36,7 @@
 //! |---------------------------|----------------------------|------------------------------|
 //! | `[i32; 2]`                | `[i32]`                    | [`unsize`]                   |
 //! | `[i32; 2]`                | `Emplacable<[i32; 2], _>`  | [`Into::into`]               |
+//! | `[i32]`                   |  `Emplacable<[i32], _>`    | [`with_emplacable_for`]      |
 //! | `[i32]`                   | `Box<[i32]>`               | [`box_new`]                  |
 //! | `Box<[i32; 2]>`           | `Box<[i32]>`               | [`CoerceUnsized`]            |
 //! | `Box<[i32]>`              | `[i32]`                    | dereference the box with `*` |
@@ -72,6 +73,7 @@
 )]
 #![warn(
     missing_docs,
+    rust_2018_idioms,
     clippy::semicolon_if_nothing_returned,
     clippy::undocumented_unsafe_blocks
 )]
@@ -150,7 +152,7 @@ pub mod macro_exports {
         T: ?Sized,
         S: Unsize<T>,
     {
-        let boxed: ImplementationDetailDoNotUseBox<S, S> = Box::new_in(val, a);
+        let boxed: ImplementationDetailDoNotUseBox<'_, S, S> = Box::new_in(val, a);
         boxed
     }
 
@@ -308,9 +310,8 @@ macro_rules! by_value_str {
     }};
 }
 
-// FIXME enable once https://github.com/rust-lang/rust/issues/109020 is fixed
-/*
-type WithEmplacableForFn<'a, T: ?Sized + 'a> = impl EmplacableFn<T> + 'a;
+/// `EmplacableFn` used by [`with_emplacable_for`].
+pub type WithEmplacableForFn<'a, T: ?Sized + 'a> = impl EmplacableFn<T> + 'a;
 
 /// Accepts a possibly-unsized value as a first argument,
 /// turns it into an [`Emplacable`], and passes the emplacer to
@@ -330,22 +331,21 @@ type WithEmplacableForFn<'a, T: ?Sized + 'a> = impl EmplacableFn<T> + 'a;
 /// });
 /// assert_eq!(&*b, &[23_i32, 4, 32]);
 /// ```
+#[cfg(not(all(doctest, any(miri, not(feature = "alloc")))))]
 #[inline]
-pub fn with_emplacable_for<'a, T: 'a, F, R>(mut val: T, mut f: F) -> R
+pub fn with_emplacable_for<T, F, R>(mut val: T, mut f: F) -> R
 where
-    T: ?Sized,
-    F: for<'b> FnMut(Emplacable<T, WithEmplacableForFn<'b, T>>) -> R,
+    T: ?Sized + 'static,
+    F: FnMut(Emplacable<T, WithEmplacableForFn<'_, T>>) -> R,
 {
-    /// SAFETY: `val` must point to a valid `T`. `val` must not be dropped
-    /// after this function completes.
+    /// SAFETY: `val` must not be dropped after this function completes.
     #[inline]
     unsafe fn with_emplacable_for_inner<'a, T: ?Sized + 'a, R>(
         val: &'a mut T,
         f: &mut dyn FnMut(Emplacable<T, WithEmplacableForFn<'a, T>>) -> R,
     ) -> R {
         fn with_emplacable_closure<T: ?Sized>(val: &mut T) -> WithEmplacableForFn<'_, T> {
-            move |emplacer: &mut Emplacer<T>| {
-                // SAFETY: We
+            move |emplacer: &mut Emplacer<'_, T>| {
                 let layout = Layout::for_value(val);
                 let metadata = ptr::metadata(val);
                 // Safety: we call the closure right after
@@ -376,13 +376,14 @@ where
         f(emplacable)
     }
 
+    // SAFETY: we `forget_unsized` val immediately after this call
     let ret = unsafe { with_emplacable_for_inner(&mut val, &mut f) };
     mem::forget_unsized(val);
     ret
-}*/
+}
 
 /// Alias of [`for<'a> FnOnce(&'a mut Emplacer<T>)`](Emplacer<T>).
-pub trait EmplacableFn<T>: for<'a> FnOnce(&'a mut Emplacer<T>)
+pub trait EmplacableFn<T>: for<'a> FnOnce(&'a mut Emplacer<'_, T>)
 where
     T: ?Sized,
 {
@@ -391,7 +392,7 @@ where
 impl<T, F> EmplacableFn<T> for F
 where
     T: ?Sized,
-    F: for<'a> FnOnce(&'a mut Emplacer<T>),
+    F: for<'a> FnOnce(&'a mut Emplacer<'_, T>),
 {
 }
 
@@ -430,7 +431,7 @@ where
     F: EmplacableFn<T>,
 {
     closure: ManuallyDrop<F>,
-    phantom: PhantomData<fn(&mut Emplacer<T>)>,
+    phantom: PhantomData<fn(&mut Emplacer<'_, T>)>,
 }
 
 impl<T, F> Emplacable<T, F>
@@ -541,7 +542,7 @@ where
 
         let sized_emplacable_closure = self.into_fn();
 
-        let unsized_emplacable_closure = move |unsized_emplacer: &mut Emplacer<U>| {
+        let unsized_emplacable_closure = move |unsized_emplacer: &mut Emplacer<'_, U>| {
             // SAFETY: We are just wrapping this emplacer
             let unsized_emplacer_closure = unsafe { unsized_emplacer.into_fn() };
 
@@ -599,7 +600,7 @@ where
             )
             .unwrap();
 
-            let slice_emplacer_closure = move |slice_emplacer: &mut Emplacer<[T]>| {
+            let slice_emplacer_closure = move |slice_emplacer: &mut Emplacer<'_, [T]>| {
                 // Move ite into closure
                 let emplacables_iter = ManuallyDrop::new(iter);
 
@@ -709,7 +710,7 @@ impl<T> IntoEmplacable<T> for T {
 
     #[inline]
     fn into_emplacable(self) -> Emplacable<T, Self::Closure> {
-        let closure = move |emplacer: &mut Emplacer<T>| {
+        let closure = move |emplacer: &mut Emplacer<'_, T>| {
             let mut manually_drop_self = ManuallyDrop::new(self);
             // Safety: we call the closure right after
             let emplacer_closure = unsafe { emplacer.into_fn() };
@@ -778,14 +779,14 @@ impl<T: Copy> CopyToBuf for T {
 }
 
 impl<'s, T: Clone + 's> IntoEmplacable<[T]> for &'s [T] {
-    type Closure = impl for<'a> FnOnce(&'a mut Emplacer<[T]>) + 's;
+    type Closure = impl for<'a> FnOnce(&'a mut Emplacer<'_, [T]>) + 's;
 
     #[inline]
     fn into_emplacable(self) -> Emplacable<[T], Self::Closure> {
         let metadata = ptr::metadata(self);
         let layout = Layout::for_value(self);
 
-        let closure = move |emplacer: &mut Emplacer<[T]>| {
+        let closure = move |emplacer: &mut Emplacer<'_, [T]>| {
             // Safety: we call the closure right after
             let emplacer_closure = unsafe { emplacer.into_fn() };
             emplacer_closure(layout, metadata, &mut |out_ptr| {
@@ -811,14 +812,14 @@ impl<'s, T: Clone + 's> From<&'s [T]>
 }
 
 impl<'s> IntoEmplacable<str> for &'s str {
-    type Closure = impl for<'a> FnOnce(&'a mut Emplacer<str>) + 's;
+    type Closure = impl for<'a> FnOnce(&'a mut Emplacer<'_, str>) + 's;
 
     #[inline]
     fn into_emplacable(self) -> Emplacable<str, Self::Closure> {
         let metadata = ptr::metadata(self);
         let layout = Layout::for_value(self);
 
-        let closure = move |emplacer: &mut Emplacer<str>| {
+        let closure = move |emplacer: &mut Emplacer<'_, str>| {
             // Safety: we call the closure right after
             let emplacer_closure = unsafe { emplacer.into_fn() };
             emplacer_closure(layout, metadata, &mut |out_ptr| {
@@ -848,14 +849,14 @@ impl<'s> From<&'s str> for Emplacable<str, <&'s str as IntoEmplacable<str>>::Clo
 }
 
 impl<'s> IntoEmplacable<CStr> for &'s CStr {
-    type Closure = impl for<'a> FnOnce(&'a mut Emplacer<CStr>) + 's;
+    type Closure = impl for<'a> FnOnce(&'a mut Emplacer<'_, CStr>) + 's;
 
     #[inline]
     fn into_emplacable(self) -> Emplacable<CStr, Self::Closure> {
         let metadata = ptr::metadata(self);
         let layout = Layout::for_value(self);
 
-        let closure = move |emplacer: &mut Emplacer<CStr>| {
+        let closure = move |emplacer: &mut Emplacer<'_, CStr>| {
             // Safety: we call the closure right after
             let emplacer_closure = unsafe { emplacer.into_fn() };
             emplacer_closure(layout, metadata, &mut |out_ptr| {
@@ -886,7 +887,7 @@ impl<'s> From<&'s CStr> for Emplacable<CStr, <&'s CStr as IntoEmplacable<CStr>>:
 
 #[cfg(feature = "std")]
 impl<'s> IntoEmplacable<OsStr> for &'s OsStr {
-    type Closure = impl for<'a> FnOnce(&'a mut Emplacer<OsStr>) + 's;
+    type Closure = impl for<'a> FnOnce(&'a mut Emplacer<'_, OsStr>) + 's;
 
     #[must_use]
     #[inline]
@@ -894,7 +895,7 @@ impl<'s> IntoEmplacable<OsStr> for &'s OsStr {
         let metadata = ptr::metadata(self);
         let layout = Layout::for_value(self);
 
-        let closure = move |emplacer: &mut Emplacer<OsStr>| {
+        let closure = move |emplacer: &mut Emplacer<'_, OsStr>| {
             // Safety: we call the closure right after
             let emplacer_closure = unsafe { emplacer.into_fn() };
             emplacer_closure(layout, metadata, &mut |out_ptr| {
@@ -928,7 +929,7 @@ impl<'s> From<&'s OsStr> for Emplacable<OsStr, <&'s OsStr as IntoEmplacable<OsSt
 
 #[cfg(feature = "std")]
 impl<'s> IntoEmplacable<Path> for &'s Path {
-    type Closure = impl for<'a> FnOnce(&'a mut Emplacer<Path>) + 's;
+    type Closure = impl for<'a> FnOnce(&'a mut Emplacer<'_, Path>) + 's;
 
     #[must_use]
     #[inline]
@@ -936,7 +937,7 @@ impl<'s> IntoEmplacable<Path> for &'s Path {
         let metadata = ptr::metadata(self);
         let layout = Layout::for_value(self);
 
-        let closure = move |emplacer: &mut Emplacer<Path>| {
+        let closure = move |emplacer: &mut Emplacer<'_, Path>| {
             // Safety: we call the closure right after
             let emplacer_closure = unsafe { emplacer.into_fn() };
             emplacer_closure(layout, metadata, &mut |out_ptr| {
@@ -987,7 +988,7 @@ impl<F: EmplacableFn<str>> IntoEmplacable<[u8]> for Emplacable<str, F> {
 
         #[allow(clippy::unused_unit)] // https://github.com/rust-lang/rust-clippy/issues/9748
         let u8_emplacer_closure = for<'a, 'b> move |u8_emplacer: &'a mut Emplacer<'b, [u8]>| -> () {
-            let u8_emplacer_fn: &mut EmplacerFn<[u8]> =
+            let u8_emplacer_fn: &mut EmplacerFn<'_, [u8]> =
                 // SAFETY: just wrapping this in another emplacer
                 unsafe { u8_emplacer.into_fn() };
 
@@ -1001,7 +1002,7 @@ impl<F: EmplacableFn<str>> IntoEmplacable<[u8]> for Emplacable<str, F> {
                     u8_emplacer_fn(layout, metadata, u8_inner_closure);
                 };
 
-            let str_emplacer: &mut Emplacer<str> =
+            let str_emplacer: &mut Emplacer<'_, str> =
                 // SAFETY: Emplacer just calle inner emplacer
                 unsafe { Emplacer::from_fn(&mut str_emplacer_fn) };
 
@@ -1029,7 +1030,7 @@ impl<T: ?Sized> IntoEmplacable<T> for Box<T> {
     type Closure = impl EmplacableFn<T>;
 
     fn into_emplacable(self) -> Emplacable<T, Self::Closure> {
-        let closure = move |emplacer: &mut Emplacer<T>| {
+        let closure = move |emplacer: &mut Emplacer<'_, T>| {
             let layout = Layout::for_value(&*self);
             let ptr = Box::into_raw(self);
             let metadata = ptr::metadata(ptr);
@@ -1074,7 +1075,7 @@ impl<T> IntoEmplacable<[T]> for Vec<T> {
     type Closure = impl EmplacableFn<[T]>;
 
     fn into_emplacable(self) -> Emplacable<[T], Self::Closure> {
-        let closure = move |emplacer: &mut Emplacer<[T]>| {
+        let closure = move |emplacer: &mut Emplacer<'_, [T]>| {
             let mut vec = ManuallyDrop::new(self);
 
             let ptr = vec.as_mut_ptr();
@@ -1152,7 +1153,7 @@ impl<T, const N: usize, F: EmplacableFn<T>> IntoEmplacable<[T; N]> for [Emplacab
 
     #[inline]
     fn into_emplacable(self) -> Emplacable<[T; N], Self::Closure> {
-        let arr_emplacer_closure = move |arr_emplacer: &mut Emplacer<[T; N]>| {
+        let arr_emplacer_closure = move |arr_emplacer: &mut Emplacer<'_, [T; N]>| {
             let mut elem_emplacables = ManuallyDrop::new(self);
             // SAFETY: we fulfill the preconditions
             let arr_emplacer_fn = unsafe { arr_emplacer.into_fn() };

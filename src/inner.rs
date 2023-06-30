@@ -166,7 +166,7 @@ pub(super) trait UnsizedVecProvider<T: ?Sized> {
     /// # Safety
     ///
     /// `index < self.len()` must hold.
-    unsafe fn remove_into_unchecked(&mut self, index: usize, emplacer: &mut Emplacer<T>);
+    unsafe fn remove_into_unchecked(&mut self, index: usize, emplacer: &mut Emplacer<'_, T>);
 
     /// # Safety
     ///
@@ -182,7 +182,7 @@ pub(super) trait UnsizedVecProvider<T: ?Sized> {
     /// # Safety
     ///
     /// `!self.is_empty()` must hold.
-    unsafe fn pop_into_unchecked(&mut self, emplacer: &mut Emplacer<T>);
+    unsafe fn pop_into_unchecked(&mut self, emplacer: &mut Emplacer<'_, T>);
 
     #[must_use]
     fn len(&self) -> usize;

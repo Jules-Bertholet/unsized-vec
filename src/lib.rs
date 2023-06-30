@@ -65,6 +65,7 @@
 #![forbid(unsafe_op_in_unsafe_fn)]
 #![warn(
     missing_docs,
+    rust_2018_idioms,
     clippy::semicolon_if_nothing_returned,
     clippy::undocumented_unsafe_blocks
 )]
@@ -893,7 +894,7 @@ impl<T: ?Sized> UnsizedVec<T> {
         }
 
         if index < self.len() {
-            let closure = move |emplacer: &mut Emplacer<T>| {
+            let closure = move |emplacer: &mut Emplacer<'_, T>| {
                 // SAFETY: check `index < len` right above
                 unsafe { self.inner.remove_into_unchecked(index, emplacer) };
             };
@@ -1038,7 +1039,7 @@ impl<T: ?Sized> UnsizedVec<T> {
     #[inline]
     pub fn pop_into(&mut self) -> Option<Emplacable<T, impl EmplacableFn<T> + '_>> {
         if !self.is_empty() {
-            let closure = move |emplacer: &mut Emplacer<T>| {
+            let closure = move |emplacer: &mut Emplacer<'_, T>| {
                 // SAFETY: checked above that vec is non-empty
                 unsafe { self.inner.pop_into_unchecked(emplacer) }
             };
