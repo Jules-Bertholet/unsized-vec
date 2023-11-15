@@ -1178,7 +1178,7 @@ impl<T, const N: usize, F: EmplacableFn<T>> IntoEmplacable<[T; N]> for [Emplacab
 
                         indexes
                             .into_iter()
-                            .zip(elem_emplacables.into_iter())
+                            .zip(elem_emplacables)
                             .for_each(|(index, elem_emplacable)| {
                                 let elem_emplacable_closure = elem_emplacable.into_fn();
                                 let elem_emplacer_closure =

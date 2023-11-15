@@ -74,7 +74,6 @@
     allocator_api,
     array_windows,
     const_align_of_val,
-    const_inherent_unchecked_arith,
     const_nonnull_new,
     const_option,
     const_size_of_val,

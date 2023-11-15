@@ -1,6 +1,6 @@
 [package]
 name = "unsized-vec"
-version = "0.0.2-alpha.7"
+version = "0.0.2-alpha.8"
 edition = "2021"
 authors = ["Jules Bertholet <julesbertholet@quoi.xyz>"]
 description = "Like Vec, but for unsized values"
@@ -16,7 +16,7 @@ members = ["emplacable"]
 emplacable = { path = "emplacable", version = "0.1.0-alpha.6", default-features = false, features = [
     "alloc",
 ] }
-serde = { version = "1.0.158", optional = true, default-features = false }
+serde = { version = "1.0.192", optional = true, default-features = false }
 
 [package.metadata.docs.rs]
 all-features = true
