@@ -1,9 +1,23 @@
 #![feature(unsized_fn_params)]
 
-use std::fmt::Debug;
+use std::{fmt::Debug, mem};
 
 use emplacable::*;
 use unsized_vec::*;
+
+#[test]
+fn test_capacity_growth() {
+    let mut v: UnsizedVec<[i32]> = UnsizedVec::with_capacity_bytes(6, mem::size_of::<i32>() * 15);
+
+    v.push_unsize([]);
+    v.push_unsize([1]);
+    v.push_unsize([1, 2]);
+    v.push_unsize([1, 2, 3]);
+    v.push_unsize([1, 2, 3, 4]);
+    v.push_unsize([1, 2, 3, 4, 5]);
+
+    assert_eq!(v.byte_capacity(), mem::size_of::<i32>() * 15);
+}
 
 #[test]
 fn emplacable_from() {
