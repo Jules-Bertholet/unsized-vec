@@ -66,16 +66,9 @@
 //! [`CoerceUnsized`]: core::ops::CoerceUnsized
 
 #![forbid(
-    unsafe_op_in_unsafe_fn,
     clippy::alloc_instead_of_core,
     clippy::std_instead_of_alloc,
     clippy::std_instead_of_core
-)]
-#![warn(
-    missing_docs,
-    rust_2018_idioms,
-    clippy::semicolon_if_nothing_returned,
-    clippy::undocumented_unsafe_blocks
 )]
 #![feature(
     allocator_api,
@@ -1176,10 +1169,8 @@ impl<T, const N: usize, F: EmplacableFn<T>> IntoEmplacable<[T; N]> for [Emplacab
                             i.wrapping_sub(1)
                         });
 
-                        indexes
-                            .into_iter()
-                            .zip(elem_emplacables)
-                            .for_each(|(index, elem_emplacable)| {
+                        indexes.into_iter().zip(elem_emplacables).for_each(
+                            |(index, elem_emplacable)| {
                                 let elem_emplacable_closure = elem_emplacable.into_fn();
                                 let elem_emplacer_closure =
                                     &mut move |_: Layout,
@@ -1198,7 +1189,8 @@ impl<T, const N: usize, F: EmplacableFn<T>> IntoEmplacable<[T; N]> for [Emplacab
                                     // start of the allocation
                                     unsafe { Emplacer::from_fn(elem_emplacer_closure) };
                                 elem_emplacable_closure(elem_emplacer);
-                            });
+                            },
+                        );
                     } else {
                         // Dropping the array of emplacers drops each emplacer,
                         // which drops the `T`s as well

@@ -12,6 +12,15 @@ categories = ["data-structures", "no-std"]
 [workspace]
 members = ["emplacable"]
 
+[workspace.lints.rust]
+missing_docs = "warn"
+rust_2018_idioms = "warn"
+unsafe_op_in_unsafe_fn = "forbid"
+
+[workspace.lints.clippy]
+semicolon_if_nothing_returned = "warn"
+undocumented_unsafe_blocks = "warn"
+
 [dependencies]
 emplacable = { path = "emplacable", version = "0.1.0-alpha.6", default-features = false, features = [
     "alloc",

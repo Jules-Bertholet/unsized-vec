@@ -212,7 +212,7 @@ impl ValidSizeUnaligned {
         let align_m_1 = align.minus_1();
 
         let Some(sum) = size.checked_add(align_m_1) else {
-            return  None;
+            return None;
         };
 
         let new = sum & !align_m_1;

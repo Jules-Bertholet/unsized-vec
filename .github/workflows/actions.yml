@@ -13,7 +13,15 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
+      CARGO_INCREMENTAL: 0
+      CARGO_NET_GIT_FETCH_WITH_CLI: true
+      CARGO_NET_RETRY: 10
+      CARGO_TERM_COLOR: always
+      RUST_BACKTRACE: 1
       RUSTFLAGS: -D warnings
+      RUSTDOCFLAGS: -D warnings
+      RUSTUP_MAX_RETRIES: 10
+      ASAN_OPTIONS: detect_leaks=1
 
     steps:
       - uses: actions/checkout@v3
@@ -25,26 +33,23 @@ jobs:
           target: x86_64-unknown-linux-gnu
           toolchain: nightly
 
-      - name: Install clippy SARIF tools and cargo careful
-        run: cargo install clippy-sarif sarif-fmt cargo-careful
-
       - name: Check formatting
         run: cargo fmt --all --check
+
+      - name: Run clippy
+        run: cargo clippy --all
+
+      - name: Check docs
+        run: cargo doc --all
 
       - name: Run tests in relase mode
         run: cargo test --all --release
 
-      - name: Run tests with careful
-        run: cargo careful test --all -Zcareful-sanitizer
-
       - name: Run tests with miri
         run: cargo miri test -p emplacable
 
-      - name: Run clippy
-        run: cargo clippy --all --message-format=json | clippy-sarif | tee rust-clippy-results.sarif | sarif-fmt
+      - name: Install cargo careful
+        run: cargo install cargo-careful
 
-      - name: Upload clippy analysis results to GitHub
-        uses: github/codeql-action/upload-sarif@v2
-        with:
-          sarif_file: rust-clippy-results.sarif
-          wait-for-processing: true
+      - name: Run tests with careful
+        run: cargo careful test --all -Zcareful-sanitizer

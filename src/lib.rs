@@ -62,13 +62,6 @@
 //! [`push`]: UnsizedVec::push
 //! [`push_unsize`]: UnsizedVec::push_unsize
 
-#![forbid(unsafe_op_in_unsafe_fn)]
-#![warn(
-    missing_docs,
-    rust_2018_idioms,
-    clippy::semicolon_if_nothing_returned,
-    clippy::undocumented_unsafe_blocks
-)]
 #![allow(incomplete_features)] // For `specialization`
 #![feature(
     allocator_api,
