@@ -37,19 +37,38 @@ impl<T> UnsizedVecProvider<T> for ::alloc::vec::Vec<T> {
     }
 
     #[inline]
+    fn byte_len(&self) -> usize {
+        // SAFETY: capacity can't overflow `isize::MAX` bytes
+        unsafe { self.len().unchecked_mul(mem::size_of::<T>()) }
+    }
+
+    #[inline]
     fn align(&self) -> usize {
         mem::align_of::<T>()
     }
 
     #[inline]
-    fn try_reserve_exact_capacity_bytes_align(
+    fn try_reserve(&mut self, additional: usize) -> Result<(), TryReserveError> {
+        Ok(self.try_reserve(additional)?)
+    }
+
+    #[inline]
+    fn try_reserve_exact(&mut self, additional: usize) -> Result<(), TryReserveError> {
+        Ok(self.try_reserve_exact(additional)?)
+    }
+
+    #[inline]
+    fn try_reserve_additional_bytes_align(
         &mut self,
-        additional: usize,
         additional_bytes: usize,
         _align: (),
     ) -> Result<(), TryReserveError> {
-        let additional = cmp::max(additional, additional_bytes.div_ceil(mem::size_of::<T>()));
-        Ok(self.try_reserve_exact(additional)?)
+        // SAFETY: capacity >= len
+        let free = unsafe { self.capacity().unchecked_sub(self.len()) };
+        let needed = additional_bytes
+            .saturating_add(free)
+            .div_ceil(mem::size_of::<T>());
+        Ok(self.try_reserve_exact(needed.saturating_sub(free))?)
     }
 
     #[inline]
@@ -74,6 +93,7 @@ impl<T> UnsizedVecProvider<T> for ::alloc::vec::Vec<T> {
         unsafe {
             let how_much_to_move = self.len().unchecked_sub(index);
             let start_ptr = self.as_mut_ptr().add(index);
+            // shift back elems to the right of pointer
             ptr::copy(start_ptr, start_ptr.add(1), how_much_to_move);
             start_ptr.write(element);
             self.set_len(self.len().unchecked_add(1));
@@ -113,7 +133,7 @@ impl<T> UnsizedVecProvider<T> for ::alloc::vec::Vec<T> {
 
         let emplacer_closure =
             &mut move |_, (), inner_closure: &mut dyn FnMut(*mut PhantomData<T>)| {
-                let reserve_result = self.try_reserve_exact_capacity_bytes_align(1, 0, ());
+                let reserve_result = <Self as UnsizedVecProvider<T>>::try_reserve_exact(self, 1);
                 unwrap_try_reserve_result(reserve_result);
 
                 // SAFETY: by precondition of function
@@ -214,7 +234,7 @@ impl<T> UnsizedVecProvider<T> for ::alloc::vec::Vec<T> {
 
         let emplacer_closure =
             &mut move |_, (), inner_closure: &mut dyn FnMut(*mut PhantomData<T>)| {
-                let reserve_result = self.try_reserve_exact_capacity_bytes_align(1, 0, ());
+                let reserve_result = <Self as UnsizedVecProvider<T>>::try_reserve(self, 1);
                 unwrap_try_reserve_result(reserve_result);
                 // SAFETY: getting pointer to end of allocation
                 let ptr_to_elem = unsafe { self.as_mut_ptr().add(self.len()) };

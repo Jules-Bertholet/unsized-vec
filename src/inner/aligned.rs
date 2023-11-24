@@ -23,14 +23,10 @@ use super::{AlignedVecImpl, AlignedVecProvider, TryReserveError, UnsizedVecProvi
 struct ElementInfo<T: ?Sized + Aligned> {
     /// The pointer metadata of the element.
     metadata: <T as SplitMetadata>::Remainder,
-    /// The offset that the element following this one would be stored at,
-    /// but disregarding padding due to over-alignment.
+    /// The offset that the element following this one would be stored at.
     /// We use this encoding to store the sizes of `Vec` elements
     /// because it allows for *O(1)* random access while only storing
     /// a single `usize`.
-    ///
-    /// To get the actual offset of the next element, use
-    /// `unchecked_pad_to(end_offset, align)`.
     end_offset: ValidSize<T>,
 }
 
@@ -143,25 +139,36 @@ impl<T: ?Sized + Aligned> UnsizedVecProvider<T> for AlignedVecInner<T> {
     }
 
     #[inline]
+    fn byte_len(&self) -> usize {
+        self.byte_len().get()
+    }
+
+    #[inline]
     fn align(&self) -> usize {
         T::ALIGN.get()
     }
 
     #[inline]
-    fn try_reserve_exact_capacity_bytes_align(
+    fn try_reserve(&mut self, additional: usize) -> Result<(), TryReserveError> {
+        Ok(self.elems_info.try_reserve(additional)?)
+    }
+
+    #[inline]
+    fn try_reserve_exact(&mut self, additional: usize) -> Result<(), TryReserveError> {
+        Ok(self.elems_info.try_reserve_exact(additional)?)
+    }
+
+    #[inline]
+    fn try_reserve_additional_bytes_align(
         &mut self,
-        additional: usize,
         additional_bytes: usize,
         _align: (),
     ) -> Result<(), TryReserveError> {
-        self.elems_info.try_reserve_exact(additional)?;
-
         let old_cap = self.byte_capacity;
 
         if additional_bytes > 0 {
             let new_cap = self
-                .byte_len()
-                .get()
+                .byte_capacity()
                 .checked_add(additional_bytes)
                 .and_then(ValidSize::<T>::new)
                 .ok_or(TryReserveError {
@@ -305,8 +312,9 @@ impl<T: ?Sized + Aligned> UnsizedVecProvider<T> for AlignedVecInner<T> {
                 // SAFETY: by `Emplacer::new` preconditions
                 let size_of_val = unsafe { ValidSize::<T>::new_unchecked(size_of_val.get()) };
 
-                let reserve_result =
-                    self.try_reserve_exact_capacity_bytes_align(1, layout.size(), ());
+                let reserve_result = self
+                    .try_reserve(1)
+                    .and_then(|()| self.try_reserve_additional_bytes_align(layout.size(), ()));
                 unwrap_try_reserve_result(reserve_result);
 
                 // SAFETY: precondition of function
@@ -490,8 +498,9 @@ impl<T: ?Sized + Aligned> UnsizedVecProvider<T> for AlignedVecInner<T> {
                 // SAFETY: by `Emplacer::new` preconditions
                 let size_of_val = unsafe { ValidSize::<T>::new_unchecked(size_of_val.get()) };
 
-                let reserve_result =
-                    self.try_reserve_exact_capacity_bytes_align(1, layout.size(), ());
+                let reserve_result = self
+                    .try_reserve(1)
+                    .and_then(|()| self.try_reserve_additional_bytes_align(layout.size(), ()));
                 unwrap_try_reserve_result(reserve_result);
 
                 let start_offset = self.byte_len();

@@ -1,6 +1,6 @@
 [package]
 name = "unsized-vec"
-version = "0.0.2-alpha.8"
+version = "0.0.2-alpha.9"
 edition = "2021"
 authors = ["Jules Bertholet <julesbertholet@quoi.xyz>"]
 description = "Like Vec, but for unsized values"
@@ -25,7 +25,12 @@ undocumented_unsafe_blocks = "warn"
 emplacable = { path = "emplacable", version = "0.1.0-alpha.6", default-features = false, features = [
     "alloc",
 ] }
-serde = { version = "1.0.192", optional = true, default-features = false }
+serde = { version = "1.0.193", optional = true, default-features = false }
+
+[profile.bench]
+codegen-units = 1
+debug = true
+lto = "fat"
 
 [package.metadata.docs.rs]
 all-features = true

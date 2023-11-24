@@ -497,7 +497,7 @@ impl<T: ?Sized> UnsizedVec<T> {
     /// [`try_reserve_capacity_bytes`]: UnsizedVec::try_reserve_capacity_bytes
     #[inline]
     pub fn try_reserve(&mut self, additional: usize) -> Result<(), TryReserveError> {
-        self.try_reserve_capacity_bytes_align(additional, 0, 1)
+        self.inner.try_reserve(additional)
     }
 
     /// Reserves capacity for at least `additional` more elements,
@@ -552,33 +552,41 @@ impl<T: ?Sized> UnsizedVec<T> {
         additional_bytes: usize,
         align: usize,
     ) -> Result<(), TryReserveError> {
+        self.try_reserve(additional)?;
+
+        debug_assert!(self.capacity() >= self.len() + additional);
+
         let align = to_align::<T>(align);
 
-        let elem_cap = self.capacity();
         let byte_cap = self.byte_capacity();
 
-        let (optimist_elem, optimist_bytes) = (
-            cmp::max(additional, elem_cap),
-            cmp::max(additional_bytes, byte_cap),
-        );
+        let needed_bytes = additional_bytes.saturating_sub(self.unused_byte_cap());
+
+        let optimist_bytes = if needed_bytes > 0 {
+            cmp::max(needed_bytes, byte_cap)
+        } else {
+            0
+        };
 
         // First we try to double capacities.
         // if that fails, we try again with only what we really need.
-
-        if optimist_elem > additional || optimist_bytes > additional_bytes {
-            let result = self.inner.try_reserve_exact_capacity_bytes_align(
-                optimist_elem,
-                optimist_bytes,
-                align,
-            );
+        if optimist_bytes > needed_bytes {
+            let result = self
+                .inner
+                .try_reserve_additional_bytes_align(optimist_bytes, align);
 
             if result.is_ok() {
                 return result;
             }
         }
 
-        self.inner
-            .try_reserve_exact_capacity_bytes_align(additional, additional_bytes, align)
+        let result = self
+            .inner
+            .try_reserve_additional_bytes_align(needed_bytes, align);
+
+        debug_assert!(self.byte_capacity() >= self.byte_len() + additional_bytes);
+
+        result
     }
 
     /// Reserves capacity for at least `additional` more elements to be inserted
@@ -597,7 +605,7 @@ impl<T: ?Sized> UnsizedVec<T> {
     /// [`try_reserve_exact_capacity_bytes`]: UnsizedVec::try_reserve_exact_capacity_bytes
     #[inline]
     pub fn try_reserve_exact(&mut self, additional: usize) -> Result<(), TryReserveError> {
-        self.try_reserve_exact_capacity_bytes_align(additional, 0, 1)
+        self.inner.try_reserve_exact(additional)
     }
 
     /// Reserves capacity for at least `additional` more elements,
@@ -654,10 +662,11 @@ impl<T: ?Sized> UnsizedVec<T> {
         additional_bytes: usize,
         align: usize,
     ) -> Result<(), TryReserveError> {
+        self.inner.try_reserve(additional)?;
         let align = to_align::<T>(align);
 
         self.inner
-            .try_reserve_exact_capacity_bytes_align(additional, additional_bytes, align)
+            .try_reserve_additional_bytes_align(additional_bytes, align)
     }
 
     /// Shrinks all the capacities of the vec as much as possible.
@@ -1051,6 +1060,13 @@ impl<T: ?Sized> UnsizedVec<T> {
         self.inner.len()
     }
 
+    /// Returns the number of used bytes in the vector.
+    #[must_use]
+    #[inline]
+    pub fn byte_len(&self) -> usize {
+        self.inner.byte_len()
+    }
+
     /// Returns `true` if the vector contains no elements.
     #[must_use]
     #[inline]
@@ -1145,6 +1161,13 @@ impl<T: ?Sized> UnsizedVec<T> {
         UnsizedVec {
             inner: <U as UnsizedVecImpl>::Impl::from_sized(self.inner),
         }
+    }
+
+    #[must_use]
+    #[inline]
+    fn unused_byte_cap(&self) -> usize {
+        // SAFETY: len <= cap
+        unsafe { self.byte_capacity().unchecked_sub(self.byte_len()) }
     }
 }
 

@@ -102,6 +102,9 @@ impl<T> Size<T> for () {
     }
 }
 
+/// Implementation of `UnsizedVec`.
+/// Different impls for for `T: ?Aligned`, `T: Aligned`,
+/// and `T: Sized`.
 pub(super) trait UnsizedVecProvider<T: ?Sized> {
     type Align: Align<T>;
     type Size: Size<T>;
@@ -126,14 +129,22 @@ pub(super) trait UnsizedVecProvider<T: ?Sized> {
     fn capacity(&self) -> usize;
 
     #[must_use]
+    fn byte_len(&self) -> usize;
+
+    #[must_use]
     fn byte_capacity(&self) -> usize;
 
     #[must_use]
     fn align(&self) -> usize;
 
-    fn try_reserve_exact_capacity_bytes_align(
+    fn try_reserve(&mut self, additional: usize) -> Result<(), TryReserveError>;
+
+    fn try_reserve_exact(&mut self, additional: usize) -> Result<(), TryReserveError>;
+
+    /// Try to reserve additional byte or align capacity,
+    /// on top of existing unused capacity. Exact (doesn't overallocate).
+    fn try_reserve_additional_bytes_align(
         &mut self,
-        additional: usize,
         additional_bytes: usize,
         align: Self::Align,
     ) -> Result<(), TryReserveError>;

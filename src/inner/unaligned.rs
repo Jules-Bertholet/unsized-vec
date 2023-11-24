@@ -104,16 +104,14 @@ impl<T: ?Sized> UnalignedVecInner<T> {
     }
 
     /// Used in `try_reserve_exact_bytes_align_unchecked`.
+    /// Returns what the length in bytes of the array would be
+    /// after its alignment is increased from `self.align` to `new_align`
     ///
     /// # Safety
     ///
-    /// `old_align <= new_align` must hold.
-    unsafe fn len_after_realign_up(
-        &mut self,
-        old_align: ValidAlign,
-        new_align: ValidAlign,
-    ) -> Option<ValidSizeUnaligned> {
-        debug_assert!(old_align <= new_align);
+    /// `self.align <= new_align` must hold.
+    unsafe fn len_after_realign_up(&mut self, new_align: ValidAlign) -> Option<ValidSizeUnaligned> {
+        debug_assert!(self.align <= new_align);
         let mut new_pad_to_new: ValidSizeUnaligned = ValidSizeUnaligned::ZERO;
         self.elems_info.iter().try_fold(
             ValidSizeUnaligned::ZERO,
@@ -127,7 +125,7 @@ impl<T: ?Sized> UnalignedVecInner<T> {
                 new_pad_to_new = new_end_offset.checked_pad_to(new_align)?;
 
                 // SAFETY: `old_align <= new_align`, so if above call returned `Some`, this must be legal.
-                let new_pad_to_old = unsafe { new_end_offset.unchecked_pad_to(old_align) };
+                let new_pad_to_old = unsafe { new_end_offset.unchecked_pad_to(self.align) };
 
                 // SAFETY: `old_align <= new_align`, so can't underflow
                 let padding_difference = unsafe { new_pad_to_new.unchecked_sub(new_pad_to_old) };
@@ -171,6 +169,7 @@ impl<T: ?Sized> UnalignedVecInner<T> {
         // Starting here, our offsets are invalid, so unwinding is UB !!!
         // To make this explicit, we use unckecked ops for arithmetic.
         // This loop is basically `len_after_realign_up`, excpet with 0 checks and modifying metadata.
+        // TODO: get from `len_after_realign_up`?
         let final_offset_shift: ValidSizeUnaligned = self.elems_info.iter_mut().fold(
             ValidSizeUnaligned::ZERO,
             |shift, ElementInfo { end_offset, .. }| {
@@ -377,65 +376,65 @@ impl<T: ?Sized> UnsizedVecProvider<T> for UnalignedVecInner<T> {
         self.align.into()
     }
 
-    fn try_reserve_exact_capacity_bytes_align(
+    #[inline]
+    fn try_reserve(&mut self, additional: usize) -> Result<(), TryReserveError> {
+        Ok(self.elems_info.try_reserve(additional)?)
+    }
+
+    #[inline]
+    fn try_reserve_exact(&mut self, additional: usize) -> Result<(), TryReserveError> {
+        Ok(self.elems_info.try_reserve_exact(additional)?)
+    }
+
+    fn try_reserve_additional_bytes_align(
         &mut self,
-        additional: usize,
         additional_bytes: usize,
         align: ValidAlign,
     ) -> Result<(), TryReserveError> {
-        self.elems_info.try_reserve_exact(additional)?;
-
         let old_align = self.align;
         let new_align = cmp::max(old_align, align);
 
-        let old_cap = self.byte_capacity;
+        let old_byte_cap = self.byte_capacity;
+        let old_byte_len = self.aligned_byte_len();
 
-        let (new_align, old_cap_realigned, size_of_existing_elems_realigned): (
-            ValidAlign,
-            ValidSizeUnaligned,
-            ValidSizeUnaligned,
-        ) = if old_align < new_align {
-            (
-                new_align,
-                old_cap.checked_pad_to(new_align).ok_or(TryReserveError {
+        let byte_len_of_existing_elems_realigned: ValidSizeUnaligned = if old_align < new_align {
+            // SAFETY: just checked `old_align < new_align`
+            unsafe { self.len_after_realign_up(new_align) }
+                // Return early if existing elems overflow `isize`
+                // when realigned.
+                .ok_or(TryReserveError {
                     kind: TryReserveErrorKind::CapacityOverflow,
-                })?,
-                // SAFETY: just checked `old_align < new_align`
-                unsafe { self.len_after_realign_up(old_align, new_align) }
-                    // Return early if existing elems overflow `isize`
-                    // when realigned.
-                    .ok_or(TryReserveError {
-                        kind: TryReserveErrorKind::CapacityOverflow,
-                    })?,
-            )
+                })?
         } else {
             if additional_bytes == 0 {
                 return Ok(());
             }
 
-            (old_align, old_cap, self.aligned_byte_len())
+            old_byte_len
         };
 
+        let realignment_of_existing_elems_cost =
+            // SAFETY: realignment can't make byte length shorter. 
+            unsafe { byte_len_of_existing_elems_realigned.unchecked_sub(old_byte_len) };
+
         // Now we add on the additional size requested.
-        let new_size = size_of_existing_elems_realigned
-            .checked_add_pad(additional_bytes, align)
+        let new_byte_cap = old_byte_cap
+            .checked_add_pad(realignment_of_existing_elems_cost.get(), new_align)
+            .and_then(|s| s.checked_add_pad(additional_bytes, new_align))
             .ok_or(TryReserveError {
                 kind: TryReserveErrorKind::CapacityOverflow,
             })?;
 
-        let old_cap = self.byte_capacity;
-        let new_cap = cmp::max(old_cap_realigned, new_size);
-
-        if old_align < new_align || old_cap < new_cap {
-            if new_cap > ValidSizeUnaligned::ZERO {
+        if old_align < new_align || old_byte_cap < new_byte_cap {
+            if new_byte_cap > ValidSizeUnaligned::ZERO {
                 // SAFETY: `new_cap` checked to be legal for following call in all branches above
-                let new_layout = unsafe { new_cap.as_layout_with_align_unchecked(new_align) };
-                let new_ptr: NonNull<[u8]> = (if old_cap == ValidSizeUnaligned::ZERO {
+                let new_layout = unsafe { new_byte_cap.as_layout_with_align_unchecked(new_align) };
+                let new_ptr: NonNull<[u8]> = (if old_byte_cap == ValidSizeUnaligned::ZERO {
                     alloc::Global.allocate(new_layout)
                 } else {
                     //  SAFETY: `old_cap` and `old_align` come from the vec
                     unsafe {
-                        let old_layout = old_cap.as_layout_with_align_unchecked(old_align);
+                        let old_layout = old_byte_cap.as_layout_with_align_unchecked(old_align);
                         alloc::Global.grow(self.ptr.cast(), old_layout, new_layout)
                     }
                 })
@@ -663,11 +662,12 @@ impl<T: ?Sized> UnsizedVecProvider<T> for UnalignedVecInner<T> {
             &mut |layout, metadata, inner_closure: &mut dyn FnMut(*mut PhantomData<T>)| {
                 let (unaligned_size_of_val, align_of_val) = decompose(layout);
 
-                let reserve_result = self.try_reserve_exact_capacity_bytes_align(
-                    1,
-                    unaligned_size_of_val.get(),
-                    align_of_val,
-                );
+                let reserve_result = self.try_reserve(1).and_then(|()| {
+                    self.try_reserve_additional_bytes_align(
+                        unaligned_size_of_val.get(),
+                        align_of_val,
+                    )
+                });
                 unwrap_try_reserve_result(reserve_result);
 
                 let aligned_size_of_val =
@@ -868,8 +868,9 @@ impl<T: ?Sized> UnsizedVecProvider<T> for UnalignedVecInner<T> {
             &mut |layout: Layout, metadata, inner_closure: &mut dyn FnMut(*mut PhantomData<T>)| {
                 let (size_of_val, align_of_val) = decompose(layout);
 
-                let reserve_result =
-                    self.try_reserve_exact_capacity_bytes_align(1, layout.size(), align_of_val);
+                let reserve_result = self.try_reserve(1).and_then(|()| {
+                    self.try_reserve_additional_bytes_align(layout.size(), align_of_val)
+                });
                 unwrap_try_reserve_result(reserve_result);
 
                 let start_offset = self.aligned_byte_len();
@@ -962,6 +963,11 @@ impl<T: ?Sized> UnsizedVecProvider<T> for UnalignedVecInner<T> {
     #[inline]
     fn len(&self) -> usize {
         self.elems_info.len()
+    }
+
+    #[inline]
+    fn byte_len(&self) -> usize {
+        self.aligned_byte_len().get()
     }
 
     #[inline]
