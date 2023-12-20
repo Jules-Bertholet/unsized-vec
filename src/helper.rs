@@ -20,7 +20,8 @@ impl<T> MetadataFromSize for T {
 
 impl<T> MetadataFromSize for [T] {
     fn from_size(size: ValidSizeUnaligned) -> <Self as Pointee>::Metadata {
-        size.get() / mem::size_of::<T>()
+        debug_assert!(size.get() != 0 || size == ValidSizeUnaligned::ZERO);
+        size.get().checked_div(mem::size_of::<T>()).unwrap_or(0)
     }
 }
 
