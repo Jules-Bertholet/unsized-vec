@@ -16,4 +16,5 @@ default = ["std"]
 alloc = []
 std = ["alloc"]
 
-[dependencies]
+[badges]
+maintenance = { status = "experimental" }
