@@ -79,7 +79,6 @@
     strict_provenance,
     try_reserve_kind,
     type_alias_impl_trait,
-    unchecked_math,
     unsize,
     unsized_fn_params,
 )]

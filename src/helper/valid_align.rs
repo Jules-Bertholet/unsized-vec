@@ -108,7 +108,7 @@ impl ValidAlign {
     #[inline]
     pub(crate) const fn dangling_thin(self) -> NonNull<()> {
         // SAFETY: self != 0
-        unsafe { NonNull::new_unchecked(ptr::invalid_mut(self.get())) }
+        unsafe { NonNull::new_unchecked(ptr::without_provenance_mut(self.get())) }
     }
 
     /// Returns the alignment of this value.

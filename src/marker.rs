@@ -18,7 +18,8 @@ pub(crate) unsafe trait Aligned {
     const ALIGN: ValidAlign;
 
     /// A dangling, well-aligned pointer thin pointer for the type.
-    const DANGLING_THIN: NonNull<()> = NonNull::new(ptr::invalid_mut(Self::ALIGN.get())).unwrap();
+    const DANGLING_THIN: NonNull<()> =
+        NonNull::new(ptr::without_provenance_mut(Self::ALIGN.get())).unwrap();
 }
 
 // SAFETY: mem::align_of::<T>() is correct

@@ -79,7 +79,6 @@
     ptr_metadata,
     strict_provenance,
     type_alias_impl_trait,
-    unchecked_math,
     unsize,
     unsized_fn_params
 )]
@@ -150,6 +149,7 @@ pub mod macro_exports {
     }
 
     impl<T> ImplementationDetailDoNotUse<T> {
+        #[allow(clippy::declare_interior_mutable_const)]
         pub const NEW: Self = Self {
             storage: Cell::new(MaybeUninit::uninit()),
             #[cfg(debug_assertions)]
@@ -1362,7 +1362,7 @@ where
 
         maybe_ptr
     } else {
-        ptr::invalid_mut(layout.align())
+        ptr::without_provenance_mut(layout.align())
     };
 
     // Avoid double-drop
@@ -1419,7 +1419,7 @@ where
             // and ensure no memory is leaked.
             let deallocer = PointerDeallocer {
                 ptr: if layout.size() == 0 {
-                    ptr::invalid_mut(layout.align())
+                    ptr::without_provenance_mut(layout.align())
                 } else {
                     // SAFETY: just checked that layout is not zero-sized
                     unsafe { alloc::alloc(layout) }
