@@ -1253,13 +1253,13 @@ pub type EmplacerFn<'a, T> = dyn for<'b> FnMut(Layout, <T as Pointee>::Metadata,
 /// You won't need to interact with this type directly unless you are writing a function
 /// that directly produces or consumes `Emplacable`s.
 ///
-/// An `Emplacer` closure generally does one of three things:
+/// An `Emplacer` closure can do one of three things:
 ///
 /// 1. Allocate memory with the layout of its first argument, run the closure it receives
-///    as its third argument with a pointer to the start of the allocation, then constructs a pointer
+///    as its third argument with a pointer to the start of the allocation, then construct a pointer
 ///    of type `T` to that allocation with the given metadata.
 /// 2. Run the closure it recieves with a null pointer to signal that the value of type `T` should be dropped in place.
-/// 3. Do nothing at all, signifying that the value of type `T` should be forgotten and its desctructor should not be run.
+/// 3. Do nothing at all, signifying that the value of type `T` should be forgotten and its destructor should not be run.
 ///
 /// `Emplacer`s are allowed to panic, unwind, abort, etc. However, they can't unwind after
 /// they have run their inner closure.
