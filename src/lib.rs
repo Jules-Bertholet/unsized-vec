@@ -162,23 +162,23 @@ type SizeTypeFor<T> = <<T as UnsizedVecImpl>::Impl as UnsizedVecProvider<T>>::Si
 /// of `T`.
 ///
 /// 1. When `T` is a [`Sized`] type, `UnsizedVec<T>` is a newtype around [`Vec<T>`][0],
-/// with exactly the same memoy layout.
+///    with exactly the same memoy layout.
 ///
 /// 2. When `T` is a slice, there are two heap allocations.
-/// The first is to the slices themsleves; they are laid out end-to-end, one after the other,
-/// with no padding in between. The second heap allocation is to a list of offsets, to store
-/// where each element begins and ends.
+///    The first is to the slices themsleves; they are laid out end-to-end, one after the other,
+///    with no padding in between. The second heap allocation is to a list of offsets, to store
+///    where each element begins and ends.
 ///
 /// 3. When `T` is neither of the above, there are still two allocations.
-/// The first allocation still contains the elements of the vector laid out end-to-end,
-/// but now every element is padded to at least the alignment of the most-aligned element
-/// in the `UnsizedVec`. For this reason, adding a new element to the vec with a larger alignment
-/// than any of the elements already in it will add new padding to all the existing elements,
-/// which will involve a lot of copying and probably a reallocation. By default, [`UnsizedVec::new`]
-/// sets the alignment to [`core::mem::align_of::<usize>()`], so as long as none of your trait objects
-/// are aligned to more than that, you won't have to worry about re-padding.
-/// For this last case, the second allocation, in addition to storing offsets, also stores the pointer
-/// metadata of each element.
+///    The first allocation still contains the elements of the vector laid out end-to-end,
+///    but now every element is padded to at least the alignment of the most-aligned element
+///    in the `UnsizedVec`. For this reason, adding a new element to the vec with a larger alignment
+///    than any of the elements already in it will add new padding to all the existing elements,
+///    which will involve a lot of copying and probably a reallocation. By default, [`UnsizedVec::new`]
+///    sets the alignment to [`core::mem::align_of::<usize>()`], so as long as none of your trait objects
+///    are aligned to more than that, you won't have to worry about re-padding.
+///    For this last case, the second allocation, in addition to storing offsets, also stores the pointer
+///    metadata of each element.
 ///
 /// ## Managing capacity
 ///
@@ -202,12 +202,12 @@ type SizeTypeFor<T> = <<T as UnsizedVecImpl>::Impl as UnsizedVecProvider<T>>::Si
 /// # Limitations
 ///
 /// - `UnsizedVec<T>` is invariant with respect to `T`; ideally, it should be covariant.
-/// This is because Rust forces invariance on all structs that contain associated types
-/// referencing `T`. Hopefully, future language features will allow lifting this limitation.
+///   This is because Rust forces invariance on all structs that contain associated types
+///   referencing `T`. Hopefully, future language features will allow lifting this limitation.
 /// - Rust functions can't directly return unsized types. So this crate's functions return
-/// them indirectly, though the "emplacer" mechanism defined in the [`emplacable`] crate.
-/// See that crate's documentation for details, and the documentation of [`pop_into`] and
-/// [`remove_into`] for usage examples.
+///   them indirectly, though the "emplacer" mechanism defined in the [`emplacable`] crate.
+///   See that crate's documentation for details, and the documentation of [`pop_into`] and
+///   [`remove_into`] for usage examples.
 ///
 /// # Example
 ///

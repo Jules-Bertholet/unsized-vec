@@ -6,29 +6,29 @@
 //! Unsized values can take many forms:
 //!
 //! - On stable Rust, values of unsized types like [`str`],
-//! `[u8]`, and `dyn Any` are generally encountered behind a pointer,
-//! like `&str` or `Box<dyn Any>`.
+//!   `[u8]`, and `dyn Any` are generally encountered behind a pointer,
+//!   like `&str` or `Box<dyn Any>`.
 //!
 //! - Nightly Rust provides limited support for passing unsized values
-//! by value as arguments to functions, using the `unsized_fn_params`
-//! feature. There is also `unsized_locals`, for storing these values
-//! on the stack using alloca. (However, that feature is "incomplete" and
-//! this crate doesn't make use of it). But even with thse two feature
-//! gates enabled, functions cannot return unsized values directly.
-//! Also, the only way to produce a by-value unsized value in today's Rust
-//! is by dereferencing a [`Box`]; this crate provides the [`unsize`] macro
-//! to work around this limitation.
+//!   by value as arguments to functions, using the `unsized_fn_params`
+//!   feature. There is also `unsized_locals`, for storing these values
+//!   on the stack using alloca. (However, that feature is "incomplete" and
+//!   this crate doesn't make use of it). But even with thse two feature
+//!   gates enabled, functions cannot return unsized values directly.
+//!   Also, the only way to produce a by-value unsized value in today's Rust
+//!   is by dereferencing a [`Box`]; this crate provides the [`unsize`] macro
+//!   to work around this limitation.
 //!
 //! - For functions that return unsized values, this crate
-//! provides the [`Emplacable`] type. Functions that want
-//! to return a value of type `T`, where `T` is unsized, return an
-//! `Emplacable<T, _>` instead. `Emplacable<T>` wraps a closure;
-//! that closure contains instructions for writing out a `T` to
-//! a caller-provided region of memory. Other functions accept the `Emplacable`
-//! as an argument and call its contained closure to write out the
-//! `T` to some allocation provided by them. For example, this crate
-//! provides the [`box_new_with`] function, which turns an `Emplacable<T>`
-//! into a [`Box<T>`].
+//!   provides the [`Emplacable`] type. Functions that want
+//!   to return a value of type `T`, where `T` is unsized, return an
+//!   `Emplacable<T, _>` instead. `Emplacable<T>` wraps a closure;
+//!   that closure contains instructions for writing out a `T` to
+//!   a caller-provided region of memory. Other functions accept the `Emplacable`
+//!   as an argument and call its contained closure to write out the
+//!   `T` to some allocation provided by them. For example, this crate
+//!   provides the [`box_new_with`] function, which turns an `Emplacable<T>`
+//!   into a [`Box<T>`].
 //!
 //! ## Converting between types
 //!
@@ -193,7 +193,7 @@ pub mod macro_exports {
     pub type FakeBoxStr<'a> = Box<str, NonAllocator<'a>>;
 
     pub fn fake_box_str<const LEN: usize>(buf: &mut [MaybeUninit<u8>; LEN]) -> FakeBoxStr<'_> {
-        let wide_ptr: *mut str = ptr::from_raw_parts_mut(buf.as_mut_ptr().cast(), LEN);
+        let wide_ptr: *mut str = ptr::from_raw_parts_mut(buf.as_mut_ptr(), LEN);
 
         // SAFETY: `NonAllocator::deallocate()` is a no-op
         unsafe { Box::from_raw_in(wide_ptr, NonAllocator(PhantomData)) }
@@ -401,7 +401,7 @@ where
 /// which is an [`FnOnce`] that accepts an [`Emplacer<T>`]. Your [`EmplacableFn<T>`] perform the follwoing steps:
 ///
 /// 1. Call [`into_fn`][`Emplacer::into_fn`] on the [`Emplacer<T>`] to obtain a [`EmplacerFn<T>`], which is an alias for
-/// `dyn FnMut(Layout, <T as Pointee>::Metadata, &mut (dyn FnMut(*mut PhantomData<T>)))`.
+///    `dyn FnMut(Layout, <T as Pointee>::Metadata, &mut (dyn FnMut(*mut PhantomData<T>)))`.
 /// 2. Call the [`EmplacerFn<T>`] with the following arguments:
 ///
 ///     1. `Layout`: The layout of the value of type `T` you want to emplace
@@ -1368,7 +1368,7 @@ where
     // Avoid double-drop
     mem::forget_unsized(x);
 
-    let wide_ptr = ptr::from_raw_parts_mut(alloc_ptr.cast(), metadata);
+    let wide_ptr = ptr::from_raw_parts_mut(alloc_ptr, metadata);
 
     // SAFETY: `Box` allocated in global allocator, except for when it would be a zero-sized allocation
     unsafe { Box::from_raw(wide_ptr) }

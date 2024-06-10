@@ -316,8 +316,7 @@ impl<T: ?Sized> Drop for UnalignedVecInner<T> {
             let start_of_alloc = self.ptr.as_ptr().cast::<u8>();
             // SAFETY: offset is within allocation
             let thin_ptr_to_elem = unsafe { start_of_alloc.add(start_offset.get()) };
-            let wide_ptr_to_elem: *mut T =
-                ptr::from_raw_parts_mut(thin_ptr_to_elem.cast(), metadata);
+            let wide_ptr_to_elem: *mut T = ptr::from_raw_parts_mut(thin_ptr_to_elem, metadata);
 
             // SAFETY: align comes from the vec
             start_offset = unsafe { end_offset.unchecked_pad_to(self.align) };
@@ -768,7 +767,7 @@ impl<T: ?Sized> UnsizedVecProvider<T> for UnalignedVecInner<T> {
                 .add(start_offset.get())
         };
 
-        let wide_ptr_to_elem: *const T = ptr::from_raw_parts(ptr_to_elem.cast(), metadata);
+        let wide_ptr_to_elem: *const T = ptr::from_raw_parts(ptr_to_elem, metadata);
 
         // SAFETY: the element is still initialized at this point
         let align_of_val = ValidAlign::of_val(unsafe { &*wide_ptr_to_elem });
@@ -927,7 +926,7 @@ impl<T: ?Sized> UnsizedVecProvider<T> for UnalignedVecInner<T> {
                 .add(start_offset.get())
         };
 
-        let wide_ptr_to_elem: *const T = ptr::from_raw_parts(ptr_to_elem.cast(), metadata);
+        let wide_ptr_to_elem: *const T = ptr::from_raw_parts(ptr_to_elem, metadata);
 
         // SAFETY: the element is still initialized at this point
         let align_of_val = ValidAlign::of_val(unsafe { &*wide_ptr_to_elem });
@@ -1089,7 +1088,7 @@ macro_rules! iter_ref {
                 let start_of_alloc = self.ptr.as_ptr().cast::<u8>();
                 // SAFETY: offset is within allocation
                 let thin_ptr_to_elem = unsafe { start_of_alloc.add(self.start_offset.get()) };
-                let wide_ptr = ptr::$from_raw_parts(thin_ptr_to_elem.cast(), metadata);
+                let wide_ptr = ptr::$from_raw_parts(thin_ptr_to_elem, metadata);
 
                 // SAFETY: pointer to element of vec
                 let wide_ref = unsafe { & $($muta)? *wide_ptr };
@@ -1136,7 +1135,7 @@ macro_rules! iter_ref {
                 let start_of_alloc = self.ptr.as_ptr().cast::<u8>();
                 // SAFETY: offset is within allocation
                 let thin_ptr_to_elem = unsafe { start_of_alloc.add(start_offset.get()) };
-                let wide_ptr = ptr::$from_raw_parts(thin_ptr_to_elem.cast(), metadata);
+                let wide_ptr = ptr::$from_raw_parts(thin_ptr_to_elem, metadata);
 
                 // SAFETY: pointer to element of vec
                 let wide_ref = unsafe { & $($muta)? *wide_ptr };
@@ -1180,7 +1179,7 @@ macro_rules! iter_ref {
                 let start_of_alloc = self.ptr.as_ptr().cast::<u8>();
                 // SAFETY: offset is within allocation
                 let thin_ptr_to_elem = unsafe { start_of_alloc.add(start_offset.get()) };
-                let wide_ptr = ptr::$from_raw_parts(thin_ptr_to_elem.cast(), metadata);
+                let wide_ptr = ptr::$from_raw_parts(thin_ptr_to_elem, metadata);
 
                 // SAFETY: pointer to element of vec
                 let wide_ref = unsafe { & $($muta)? *wide_ptr };

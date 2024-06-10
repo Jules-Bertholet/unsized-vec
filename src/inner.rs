@@ -31,20 +31,12 @@ pub(super) trait Align<T: ?Sized>:
 {
     #[must_use]
     fn new(align: usize) -> Option<Self>;
-
-    #[must_use]
-    fn of_val(val: &T) -> Self;
 }
 
 impl<T: ?Sized> Align<T> for ValidAlign {
     #[inline]
     fn new(align: usize) -> Option<Self> {
         ValidAlign::new(align)
-    }
-
-    #[inline]
-    fn of_val(val: &T) -> Self {
-        ValidAlign::of_val(val)
     }
 }
 
@@ -53,9 +45,6 @@ impl<T: ?Sized + Aligned> Align<T> for () {
     fn new(_: usize) -> Option<Self> {
         Some(())
     }
-
-    #[inline]
-    fn of_val(_: &T) -> Self {}
 }
 
 pub(super) trait Size<T: ?Sized>:
