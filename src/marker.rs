@@ -39,10 +39,5 @@ unsafe impl Aligned for str {
 
 // SAFETY: All `CStrs`s have the same alignment
 unsafe impl Aligned for CStr {
-    const ALIGN: ValidAlign = ValidAlign::new(mem::align_of_val(&
-    // SAFETY: passed-in ends with NUL car
-    unsafe {
-        CStr::from_bytes_with_nul_unchecked(&[b'\0'])
-    }))
-    .unwrap();
+    const ALIGN: ValidAlign = ValidAlign::new(mem::align_of_val(&c"")).unwrap();
 }

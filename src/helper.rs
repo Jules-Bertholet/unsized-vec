@@ -9,7 +9,6 @@ use self::{valid_align::ValidAlign, valid_size::ValidSizeUnaligned};
 
 /// Used by `UnsizedVec` to only store offset and pointer metadata
 /// when the latter can't be derived from the former.
-
 pub(crate) trait MetadataFromSize: Aligned {
     fn from_size(size: ValidSizeUnaligned) -> <Self as Pointee>::Metadata;
 }

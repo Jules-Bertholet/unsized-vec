@@ -66,17 +66,12 @@
 #![feature(
     allocator_api,
     array_windows,
-    const_align_of_val,
-    const_nonnull_new,
-    const_option,
-    const_size_of_val,
     forget_unsized,
     int_roundings,
     ptr_metadata,
     // We avoid specializing based on subtyping,
     // so barring compiler bugs, our usage should be sound.
     specialization,
-    strict_provenance,
     try_reserve_kind,
     type_alias_impl_trait,
     unsize,
@@ -1445,7 +1440,7 @@ where
 
 impl<T> Clone for UnsizedVec<T>
 where
-    T: ?Sized + Clone,
+    T: Clone,
 {
     #[inline]
     fn clone(&self) -> Self {

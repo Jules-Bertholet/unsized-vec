@@ -77,7 +77,6 @@
     impl_trait_in_assoc_type,
     min_specialization,
     ptr_metadata,
-    strict_provenance,
     type_alias_impl_trait,
     unsize,
     unsized_fn_params
@@ -168,10 +167,7 @@ pub mod macro_exports {
             debug_assert!(!self.allocated);
             // SAFETY: Address of `self.0` can't be null
             let thin_ptr = unsafe { NonNull::new_unchecked(self.storage.as_ptr()) };
-            Ok(NonNull::from_raw_parts(
-                thin_ptr.cast(),
-                mem::size_of::<T>(),
-            ))
+            Ok(NonNull::from_raw_parts(thin_ptr, mem::size_of::<T>()))
         }
 
         unsafe fn deallocate(&self, _ptr: NonNull<u8>, _layout: Layout) {}
@@ -181,7 +177,7 @@ pub mod macro_exports {
     pub struct NonAllocator<'a>(PhantomData<&'a mut ()>);
 
     // SAFETY: `allocate` is a stub that is never run and always panics
-    unsafe impl<'a> Allocator for NonAllocator<'a> {
+    unsafe impl Allocator for NonAllocator<'_> {
         fn allocate(&self, _: Layout) -> Result<NonNull<[u8]>, AllocError> {
             unreachable!()
         }
@@ -303,8 +299,41 @@ macro_rules! by_value_str {
     }};
 }
 
-/// `EmplacableFn` used by [`with_emplacable_for`].
-pub type WithEmplacableForFn<'a, T: ?Sized + 'a> = impl EmplacableFn<T> + 'a;
+mod with_emplacable_for {
+    use super::*;
+
+    /// `EmplacableFn` used by [`with_emplacable_for`].
+    pub type WithEmplacableForFn<'a, T: ?Sized + 'a> = impl EmplacableFn<T> + 'a;
+
+    pub fn with_emplacable_closure<T: ?Sized>(val: &mut T) -> WithEmplacableForFn<'_, T> {
+        move |emplacer: &mut Emplacer<'_, T>| {
+            let layout = Layout::for_value(val);
+            let metadata = ptr::metadata(val);
+            // Safety: we call the closure right after
+            let emplacer_closure = unsafe { emplacer.into_fn() };
+            emplacer_closure(layout, metadata, &mut |out_ptr| {
+                if !out_ptr.is_null() {
+                    // SAFETY: copying value where it belongs.
+                    // We `forget` right after to prevent double-free.
+                    // `Emplacer` preconditions say this can only be run once.
+                    unsafe {
+                        ptr::copy_nonoverlapping(
+                            ptr::addr_of_mut!(*val).cast::<u8>(),
+                            out_ptr.cast(),
+                            layout.size(),
+                        );
+                    }
+                } else {
+                    // SAFETY: we `mem::forget` `val` later to avoid double-drop
+                    unsafe { ptr::drop_in_place(val) }
+                }
+            });
+        }
+    }
+}
+
+use with_emplacable_for::with_emplacable_closure;
+pub use with_emplacable_for::WithEmplacableForFn;
 
 /// Accepts a possibly-unsized value as a first argument,
 /// turns it into an [`Emplacable`], and passes the emplacer to
@@ -337,32 +366,6 @@ where
         val: &'a mut T,
         f: &mut dyn FnMut(Emplacable<T, WithEmplacableForFn<'a, T>>) -> R,
     ) -> R {
-        fn with_emplacable_closure<T: ?Sized>(val: &mut T) -> WithEmplacableForFn<'_, T> {
-            move |emplacer: &mut Emplacer<'_, T>| {
-                let layout = Layout::for_value(val);
-                let metadata = ptr::metadata(val);
-                // Safety: we call the closure right after
-                let emplacer_closure = unsafe { emplacer.into_fn() };
-                emplacer_closure(layout, metadata, &mut |out_ptr| {
-                    if !out_ptr.is_null() {
-                        // SAFETY: copying value where it belongs.
-                        // We `forget` right after to prevent double-free.
-                        // `Emplacer` preconditions say this can only be run once.
-                        unsafe {
-                            ptr::copy_nonoverlapping(
-                                ptr::addr_of_mut!(*val).cast::<u8>(),
-                                out_ptr.cast(),
-                                layout.size(),
-                            );
-                        }
-                    } else {
-                        // SAFETY: we `mem::forget` `val` later to avoid double-drop
-                        unsafe { ptr::drop_in_place(val) }
-                    }
-                });
-            }
-        }
-
         // SAFETY: closure fulfills safety preconditions
         let emplacable = unsafe { Emplacable::from_fn(with_emplacable_closure(val)) };
 
@@ -407,7 +410,7 @@ where
 ///     1. `Layout`: The layout of the value of type `T` you want to emplace
 ///     2. `<T as Pointee>::Metadata`: The pointer metadata of the value of type `T` you want to emplace
 ///     3. `&mut (dyn FnMut(*mut PhantomData<T>)))`: The closure you must pass for this thrid argument
-///         must do one of two things, depending on the `*mut PhantomData<T>` pointer it recieves.
+///        must do one of two things, depending on the `*mut PhantomData<T>` pointer it recieves.
 ///         - if the pointer is null, it should drop the value of type `T`.
 ///         - otherwise, it should write the value of type `T` to the pointer,
 ///           which it can assume points to the start of an allocation with the size and alignment of

@@ -19,8 +19,14 @@ impl<T> UnsizedVecProvider<T> for ::alloc::vec::Vec<T> {
     type Align = ();
     type Size = ();
 
-    type Iter<'a> = Iter<'a, T> where T: 'a;
-    type IterMut<'a> = IterMut<'a, T> where T: 'a;
+    type Iter<'a>
+        = Iter<'a, T>
+    where
+        T: 'a;
+    type IterMut<'a>
+        = IterMut<'a, T>
+    where
+        T: 'a;
 
     const NEW_ALIGN_1: Self = ::alloc::vec::Vec::new();
     const NEW_ALIGN_PTR: Self = Self::NEW_ALIGN_1;

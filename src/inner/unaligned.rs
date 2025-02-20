@@ -341,8 +341,14 @@ impl<T: ?Sized> UnsizedVecProvider<T> for UnalignedVecInner<T> {
     type Align = ValidAlign;
     type Size = ValidSizeUnaligned;
 
-    type Iter<'a> = UnalignedIter<'a, T> where T: 'a;
-    type IterMut<'a> = UnalignedIterMut<'a, T> where T: 'a;
+    type Iter<'a>
+        = UnalignedIter<'a, T>
+    where
+        T: 'a;
+    type IterMut<'a>
+        = UnalignedIterMut<'a, T>
+    where
+        T: 'a;
 
     const NEW_ALIGN_1: UnalignedVecInner<T> = UnalignedVecInner {
         ptr: <() as Aligned>::DANGLING_THIN,
@@ -518,7 +524,7 @@ impl<T: ?Sized> UnsizedVecProvider<T> for UnalignedVecInner<T> {
                     new_align: ValidAlign,
                 }
 
-                impl<'a, T: ?Sized> Drop for Realigner<'a, T> {
+                impl<T: ?Sized> Drop for Realigner<'_, T> {
                     #[inline]
                     fn drop(&mut self) {
                         let old_align = self.vec.align;
@@ -988,8 +994,7 @@ impl<T: ?Sized> UnsizedVecProvider<T> for UnalignedVecInner<T> {
 
             // SAFETY: `start_offset` in range of allocation
             NonNull::from_raw_parts(
-                NonNull::new_unchecked(self.ptr.as_ptr().cast::<u8>().add(start_offset.get()))
-                    .cast(),
+                NonNull::new_unchecked(self.ptr.as_ptr().cast::<u8>().add(start_offset.get())),
                 metadata,
             )
         }

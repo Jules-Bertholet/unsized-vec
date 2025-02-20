@@ -13,7 +13,7 @@ fn into_impls() {
     let a: &str = "iiiiii";
     let _: Box<str> = box_new_with(a.into());
 
-    let a: &CStr = unsafe { CStr::from_bytes_with_nul_unchecked(b"hiii\0") };
+    let a: &CStr = c"hiii";
     let _: Box<CStr> = box_new_with(a.into());
 
     let a: &OsStr = &OsString::from("a");

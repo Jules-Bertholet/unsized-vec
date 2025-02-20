@@ -115,8 +115,14 @@ impl<T: ?Sized + Aligned> UnsizedVecProvider<T> for AlignedVecInner<T> {
     type Align = ();
     type Size = ValidSize<T>;
 
-    type Iter<'a> = AlignedIter<'a, T> where T: 'a;
-    type IterMut<'a> = AlignedIterMut<'a, T> where T: 'a;
+    type Iter<'a>
+        = AlignedIter<'a, T>
+    where
+        T: 'a;
+    type IterMut<'a>
+        = AlignedIterMut<'a, T>
+    where
+        T: 'a;
 
     const NEW_ALIGN_1: Self = AlignedVecInner {
         ptr: T::DANGLING_THIN,
@@ -605,8 +611,7 @@ impl<T: ?Sized + Aligned> UnsizedVecProvider<T> for AlignedVecInner<T> {
 
             // SAFETY: `start_offset` in range of allocation
             NonNull::from_raw_parts(
-                NonNull::new_unchecked(self.ptr.as_ptr().cast::<u8>().add(start_offset.get()))
-                    .cast(),
+                NonNull::new_unchecked(self.ptr.as_ptr().cast::<u8>().add(start_offset.get())),
                 metadata,
             )
         }
