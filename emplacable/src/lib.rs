@@ -70,6 +70,7 @@
     clippy::std_instead_of_alloc,
     clippy::std_instead_of_core
 )]
+#![allow(internal_features)] // for `unsized_fn_params`
 #![feature(
     allocator_api,
     closure_lifetime_binder,
@@ -212,6 +213,7 @@ pub mod macro_exports {
 /// # Example
 ///
 /// ```
+/// #![allow(internal_features)] // for `unsized_fn_params`
 /// #![feature(unsized_fn_params)]
 ///
 /// use core::fmt::Debug;
@@ -260,6 +262,7 @@ macro_rules! unsize {
 /// # Example
 ///
 /// ```
+/// #![allow(internal_features)] // for `unsized_fn_params`
 /// #![feature(allocator_api, ptr_metadata, unsized_fn_params)]
 ///
 /// use emplacable::{box_new, by_value_str};
@@ -344,6 +347,7 @@ pub use with_emplacable_for::WithEmplacableForFn;
 /// # Example
 ///
 /// ```
+/// #![allow(internal_features)] // for `unsized_fn_params`
 /// #![feature(allocator_api, ptr_metadata, unsized_fn_params)]
 ///
 /// use emplacable::{box_new_with, unsize, with_emplacable_for};

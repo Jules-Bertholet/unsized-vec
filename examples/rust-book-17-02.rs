@@ -3,7 +3,10 @@
 //!
 //! [0]: https://doc.rust-lang.org/book/ch17-02-trait-objects.html
 
-#![allow(dead_code)]
+#![allow(
+    dead_code,
+    internal_features, // for `unsized_fn_params`
+)]
 #![feature(allocator_api, ptr_metadata, unsized_fn_params)]
 
 use emplacable::by_value_str;

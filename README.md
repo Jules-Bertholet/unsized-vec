@@ -23,6 +23,7 @@ Say goodbye to `Vec<Box<dyn Any>>`! Cut down on your heap allocations.
 ## Example
 
 ```rust
+#![allow(internal_features)] // for `unsized_fn_params`
 #![feature(unsized_fn_params)]
 
 use core::fmt::Debug;

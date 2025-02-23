@@ -1,3 +1,4 @@
+#![allow(internal_features)] // for `unsized_fn_params`
 #![feature(unsized_fn_params)]
 
 use std::{fmt::Debug, mem};

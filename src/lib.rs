@@ -62,7 +62,10 @@
 //! [`push`]: UnsizedVec::push
 //! [`push_unsize`]: UnsizedVec::push_unsize
 
-#![allow(incomplete_features)] // For `specialization`
+#![allow(
+    incomplete_features, // For `specialization`
+    internal_features, // for `unsized_fn_params`
+)]
 #![feature(
     allocator_api,
     array_windows,
@@ -207,6 +210,7 @@ type SizeTypeFor<T> = <<T as UnsizedVecImpl>::Impl as UnsizedVecProvider<T>>::Si
 /// # Example
 ///
 /// ```
+/// #![allow(internal_features)] // for `unsized_fn_params`
 /// #![feature(unsized_fn_params)]
 /// use core::fmt::Debug;
 ///
@@ -751,6 +755,7 @@ impl<T: ?Sized> UnsizedVec<T> {
     /// # Example
     ///
     /// ```
+    /// #![allow(internal_features)] // for `unsized_fn_params`
     /// #![feature(allocator_api, ptr_metadata, unsized_fn_params)]
     ///
     /// use core::fmt::Debug;
@@ -820,6 +825,7 @@ impl<T: ?Sized> UnsizedVec<T> {
     /// # Example
     ///
     /// ```
+    /// #![allow(internal_features)] // for `unsized_fn_params`
     /// #![feature(allocator_api, ptr_metadata, unsized_fn_params)]
     ///
     /// use core::fmt::Debug;
@@ -913,6 +919,7 @@ impl<T: ?Sized> UnsizedVec<T> {
     /// # Example
     ///
     /// ```
+    /// #![allow(internal_features)] // for `unsized_fn_params`
     /// #![feature(allocator_api, ptr_metadata, unsized_fn_params)]
     ///
     /// use core::fmt::Debug;
@@ -965,6 +972,7 @@ impl<T: ?Sized> UnsizedVec<T> {
     /// to [`emplacable::box_new_with`].
     ///
     /// ```
+    /// #![allow(internal_features)] // for `unsized_fn_params`
     /// #![feature(allocator_api, ptr_metadata, unsized_fn_params)]
     ///
     /// use core::fmt::Debug;
@@ -1563,6 +1571,7 @@ impl<T: ?Sized, F: EmplacableFn<T>> PushToUnsizedVec<T> for Emplacable<T, F> {
 /// # Example
 ///
 /// ```
+/// #![allow(internal_features)] // for `unsized_fn_params`
 /// #![feature(allocator_api, ptr_metadata, unsized_fn_params)]
 ///
 /// use emplacable::unsize;
