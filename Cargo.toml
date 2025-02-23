@@ -22,7 +22,7 @@ semicolon_if_nothing_returned = "warn"
 undocumented_unsafe_blocks = "warn"
 
 [dependencies]
-emplacable = { path = "emplacable", version = "0.1.0-alpha.14", default-features = false, features = [
+emplacable = { path = "emplacable", version = "0.1.0-alpha.16", default-features = false, features = [
     "alloc",
 ] }
 serde = { version = "1.0.193", optional = true, default-features = false }
