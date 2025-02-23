@@ -889,7 +889,6 @@ impl<'s> From<&'s CStr> for Emplacable<CStr, <&'s CStr as IntoEmplacable<CStr>>:
 impl<'s> IntoEmplacable<OsStr> for &'s OsStr {
     type Closure = impl for<'a> FnOnce(&'a mut Emplacer<'_, OsStr>) + 's;
 
-    #[must_use]
     #[inline]
     fn into_emplacable(self) -> Emplacable<OsStr, Self::Closure> {
         let metadata = ptr::metadata(self);
@@ -931,7 +930,6 @@ impl<'s> From<&'s OsStr> for Emplacable<OsStr, <&'s OsStr as IntoEmplacable<OsSt
 impl<'s> IntoEmplacable<Path> for &'s Path {
     type Closure = impl for<'a> FnOnce(&'a mut Emplacer<'_, Path>) + 's;
 
-    #[must_use]
     #[inline]
     fn into_emplacable(self) -> Emplacable<Path, Self::Closure> {
         let metadata = ptr::metadata(self);
