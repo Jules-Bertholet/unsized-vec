@@ -10,7 +10,7 @@
 #![feature(allocator_api, ptr_metadata, unsized_fn_params)]
 
 use emplacable::by_value_str;
-use unsized_vec::{unsize_vec, unsized_vec, UnsizedVec};
+use unsized_vec::{UnsizedVec, unsize_vec, unsized_vec};
 
 mod gui {
     //! lib.rs

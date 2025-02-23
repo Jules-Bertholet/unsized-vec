@@ -98,7 +98,7 @@ use core::{
     mem,
     ops::{Index, IndexMut},
 };
-use emplacable::{unsize, Emplacable, EmplacableFn, Emplacer};
+use emplacable::{Emplacable, EmplacableFn, Emplacer, unsize};
 
 use inner::{Align, Size, UnsizedVecImpl, UnsizedVecProvider};
 
@@ -1522,7 +1522,7 @@ where
 }
 
 #[cfg(feature = "serde")]
-use serde::{ser::SerializeSeq, Serialize};
+use serde::{Serialize, ser::SerializeSeq};
 
 #[cfg(feature = "serde")]
 impl<T> Serialize for UnsizedVec<T>

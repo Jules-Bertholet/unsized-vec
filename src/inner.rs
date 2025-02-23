@@ -12,12 +12,12 @@ use core::{
 };
 
 use crate::{
+    TryReserveError,
     helper::{
         valid_align::ValidAlign,
         valid_size::{ValidSize, ValidSizeUnaligned},
     },
     marker::Aligned,
-    TryReserveError,
 };
 
 use emplacable::{Emplacable, EmplacableFn, Emplacer};

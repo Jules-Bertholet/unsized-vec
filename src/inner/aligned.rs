@@ -7,13 +7,13 @@ use core::{
     iter::FusedIterator,
     marker::{PhantomData, Unsize},
     mem::{self, ManuallyDrop},
-    ptr::{self, addr_of, NonNull},
+    ptr::{self, NonNull, addr_of},
 };
 
 use emplacable::{Emplacable, EmplacableFn, Emplacer};
 
 use crate::{
-    helper::{decompose, valid_size::ValidSize, MetadataRemainder, SplitMetadata},
+    helper::{MetadataRemainder, SplitMetadata, decompose, valid_size::ValidSize},
     marker::Aligned,
     unwrap_try_reserve_result,
 };

@@ -7,15 +7,15 @@ use core::{
     iter::FusedIterator,
     marker::{PhantomData, Unsize},
     mem::{self, ManuallyDrop},
-    ptr::{self, addr_of, NonNull},
+    ptr::{self, NonNull, addr_of},
 };
 
 use emplacable::{Emplacable, EmplacableFn, Emplacer};
 
 use crate::{
     helper::{
-        decompose, valid_align::ValidAlign, valid_size::ValidSizeUnaligned, MetadataRemainder,
-        SplitMetadata,
+        MetadataRemainder, SplitMetadata, decompose, valid_align::ValidAlign,
+        valid_size::ValidSizeUnaligned,
     },
     marker::Aligned,
     unwrap_try_reserve_result,
@@ -192,13 +192,16 @@ impl<T: ?Sized> UnalignedVecInner<T> {
             final_offset_shift,
             |shift_end,
 
-             &[ElementInfo {
-                 end_offset: prev_end_offset,
-                 ..
-             }, ElementInfo {
-                 end_offset: new_end_offset,
-                 ..
-             }]| {
+             &[
+                ElementInfo {
+                    end_offset: prev_end_offset,
+                    ..
+                },
+                ElementInfo {
+                    end_offset: new_end_offset,
+                    ..
+                },
+            ]| {
                 // SAFETY:: See comments inside block
                 unsafe {
                     // SAFETY: Reversing computation in the last loop.
@@ -254,13 +257,16 @@ impl<T: ?Sized> UnalignedVecInner<T> {
         // This is a lot simpler than `realign_up`, we can do everyting in a single pass.
 
         let mut shift_back = ValidSizeUnaligned::ZERO;
-        for &[ElementInfo {
-            end_offset: prev_new_end_offset,
-            ..
-        }, ElementInfo {
-            end_offset: old_end_offset,
-            ..
-        }] in self.elems_info.array_windows::<2>()
+        for &[
+            ElementInfo {
+                end_offset: prev_new_end_offset,
+                ..
+            },
+            ElementInfo {
+                end_offset: old_end_offset,
+                ..
+            },
+        ] in self.elems_info.array_windows::<2>()
         {
             // SAFETY: shift must be smaller than size of allocation up to this point
             let new_end_offset = unsafe { old_end_offset.unchecked_sub(shift_back) };
