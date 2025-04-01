@@ -308,6 +308,7 @@ mod with_emplacable_for {
     /// `EmplacableFn` used by [`with_emplacable_for`].
     pub type WithEmplacableForFn<'a, T: ?Sized + 'a> = impl EmplacableFn<T> + 'a;
 
+    #[define_opaque(WithEmplacableForFn)]
     pub fn with_emplacable_closure<T: ?Sized>(val: &mut T) -> WithEmplacableForFn<'_, T> {
         move |emplacer: &mut Emplacer<'_, T>| {
             let layout = Layout::for_value(val);
